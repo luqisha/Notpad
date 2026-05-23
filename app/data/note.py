@@ -1,0 +1,34 @@
+NOTES = [
+    {
+        "note_id": "n1",
+        "user_id": "u1",
+        "note_title": "Grocery list",
+        "note_body": "Milk, eggs, bread, coffee",
+        "bg_color": "#FFF9C4",
+        "is_pinned": True,
+    },
+    {
+        "note_id": "n2",
+        "user_id": "u1",
+        "note_title": "Meeting notes",
+        "note_body": "Discuss Q2 roadmap on Monday at 10am",
+        "bg_color": "#E3F2FD",
+        "is_pinned": False,
+    },
+    {
+        "note_id": "n3",
+        "user_id": "u2",
+        "note_title": "Book ideas",
+        "note_body": "Sci-fi short stories about time travel",
+        "bg_color": "#F3E5F5",
+        "is_pinned": False,
+    },
+    {
+        "note_id": "n4",
+        "user_id": "u2",
+        "note_title": "Workout plan",
+        "note_body": "Mon: run, Wed: gym, Fri: yoga",
+        "bg_color": "#E8F5E9",
+        "is_pinned": True,
+    },
+]
