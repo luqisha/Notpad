@@ -1,0 +1,17 @@
+[
+  {
+    "group_id": "g1",
+    "user_id": "u1",
+    "group_name": "Work"
+  },
+  {
+    "group_id": "g2",
+    "user_id": "u1",
+    "group_name": "Personal"
+  },
+  {
+    "group_id": "g3",
+    "user_id": "u2",
+    "group_name": "Ideas"
+  }
+]
