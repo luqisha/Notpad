@@ -1,37 +1,5 @@
 [
   {
-    "note_id": "n1",
-    "user_id": "u1",
-    "note_title": "Grocery list",
-    "note_body": "Milk, eggs, bread, coffee",
-    "bg_color": "#FFF9C4",
-    "is_pinned": true
-  },
-  {
-    "note_id": "n2",
-    "user_id": "u1",
-    "note_title": "Meeting notes",
-    "note_body": "Discuss Q2 roadmap on Monday at 10am",
-    "bg_color": "#E3F2FD",
-    "is_pinned": false
-  },
-  {
-    "note_id": "n3",
-    "user_id": "u2",
-    "note_title": "Book ideas",
-    "note_body": "Sci-fi short stories about time travel",
-    "bg_color": "#F3E5F5",
-    "is_pinned": false
-  },
-  {
-    "note_id": "n4",
-    "user_id": "u2",
-    "note_title": "Workout plan",
-    "note_body": "Mon: run, Wed: gym, Fri: yoga",
-    "bg_color": "#E8F5E9",
-    "is_pinned": true
-  },
-  {
     "note_id": "8cdaec31-e3ff-479c-9877-2ae9f18f75a7",
     "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
     "note_title": "First Note",
@@ -61,6 +29,14 @@
     "note_title": "Pinned Note",
     "note_body": "This is a pinned note",
     "bg_color": "#FFFFFF",
+    "is_pinned": true
+  },
+  {
+    "note_id": "14e44b2b-ee40-49f0-9ab1-25311c4c2903",
+    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
+    "note_title": "Check BG Color",
+    "note_body": "This note is to change the bg-color",
+    "bg_color": "#AAAAAA",
     "is_pinned": true
   }
 ]
