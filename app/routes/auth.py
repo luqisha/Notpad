@@ -1,7 +1,7 @@
 import uuid
 
 import bcrypt
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 
 from app.utils.data_loader import load_users, save_users
@@ -26,16 +26,16 @@ def _verify_password(password: str, hashed: str) -> bool:
 
 
 @router.post("/auth/register")
-def register(usermail: str, password: str):
+def register(credentials: UserCreate):
     try:
-        credentials = UserCreate(user_mail=usermail, password=password)
+        credentials = UserCreate(user_mail=credentials.user_mail, password=credentials.password)
     except ValidationError as exc:
-        return {"message": "Invalid registration data", "errors": exc.errors()}
+        raise HTTPException(status_code=400, detail="Invalid registration data")
 
     users = load_users()
 
     if _find_user_by_mail(users, credentials.user_mail):
-        return {"message": "User already exists"}
+        raise HTTPException(status_code=409, detail="User already exists")
 
     users.append(
         User(
@@ -49,19 +49,19 @@ def register(usermail: str, password: str):
 
 
 @router.post("/auth/login")
-def login(request: Request, usermail: str, password: str):
+def login(request: Request, credentials: UserCreate):
     try:
-        credentials = UserCreate(user_mail=usermail, password=password)
+        credentials = UserCreate(user_mail=credentials.user_mail, password=credentials.password)
     except ValidationError as exc:
-        return {"message": "Invalid login data", "errors": exc.errors()}
+        raise HTTPException(status_code=400, detail="Invalid login data")
 
     users = load_users()
     user = _find_user_by_mail(users, credentials.user_mail)
     if not user:
-        return {"message": "User not found"}
+        raise HTTPException(status_code=404, detail="User not found")
 
     if not _verify_password(credentials.password, user.user_pass):
-        return {"message": "Invalid password"}
+        raise HTTPException(status_code=401, detail="Invalid password")
 
     request.session["user_id"] = user.user_id
     return {"message": "Login successful", "user_id": user.user_id}
