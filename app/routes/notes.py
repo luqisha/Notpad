@@ -1,5 +1,6 @@
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 
@@ -17,6 +18,23 @@ def _find_user_by_id(users: list, user_id: str):
         if user["user_id"] == user_id:
             return user
     return None
+
+
+def _get_user_notes_sorted(notes: list, user_id: str) -> list:
+    user_notes = [note for note in notes if note["user_id"] == user_id]
+    user_notes.sort(key=lambda note: not note.get("is_pinned", False))
+    return user_notes
+
+
+def _with_serial_numbers(user_notes: list) -> list:
+    return [{**note, "serial_number": index} for index, note in enumerate(user_notes, start=1)]
+
+
+def _find_note_by_serial(notes: list, user_id: str, serial_number: int) -> Optional[dict]:
+    user_notes = _get_user_notes_sorted(notes, user_id)
+    if serial_number < 1 or serial_number > len(user_notes):
+        return None
+    return user_notes[serial_number - 1]
 
 
 @router.post("/notes")
@@ -52,7 +70,10 @@ def create_note(
     }
     notes.append(note)
     write_file(_NOTES_FILE, notes)
-    return {"message": "Note created successfully", "note": note}
+
+    user_notes = _with_serial_numbers(_get_user_notes_sorted(notes, user_id))
+    created = next(n for n in user_notes if n["note_id"] == note["note_id"])
+    return {"message": "Note created successfully", "note": created}
 
 
 @router.get("/notes")
@@ -62,16 +83,67 @@ def get_notes(request: Request):
         return {"message": "no user is logged in"}
 
     notes = read_file(_NOTES_FILE)
-    user_notes = [note for note in notes if note["user_id"] == user_id]
-    user_notes.sort(key=lambda note: not note.get("is_pinned", False))
+    user_notes = _with_serial_numbers(_get_user_notes_sorted(notes, user_id))
     return {"message": "Notes retrieved successfully", "notes": user_notes}
 
 
-@router.patch("/notes/{note_id}")
-def update_note(note_id: str, title: str, body: str):
-    return {"message": "Note updated successfully"}
+@router.patch("/notes/{serial_number}")
+def update_note(
+    request: Request,
+    serial_number: int,
+    title: Optional[str] = Query(default=None, description="New note title."),
+    body: Optional[str] = Query(default=None, description="New note body."),
+    bg_color: Optional[str] = Query(default=None, description="New background hex color."),
+    is_pinned: Optional[bool] = Query(default=None, description="Pin or unpin the note."),
+):
+    user_id = get_logged_in_user_id(request)
+    if not user_id:
+        return {"message": "no user is logged in"}
+
+    if all(v is None for v in (title, body, bg_color, is_pinned)):
+        return {"message": "No fields to update"}
+
+    notes = read_file(_NOTES_FILE)
+    note = _find_note_by_serial(notes, user_id, serial_number)
+    if not note:
+        return {"message": "Note not found"}
+
+    note_id = note["note_id"]
+    for stored in notes:
+        if stored["note_id"] != note_id:
+            continue
+        if title is not None:
+            stored["note_title"] = title
+        if body is not None:
+            stored["note_body"] = body
+        if bg_color is not None:
+            stored["bg_color"] = bg_color
+        if is_pinned is not None:
+            stored["is_pinned"] = is_pinned
+        break
+
+    write_file(_NOTES_FILE, notes)
+
+    user_notes = _with_serial_numbers(_get_user_notes_sorted(notes, user_id))
+    updated = next(n for n in user_notes if n["note_id"] == note_id)
+    return {"message": "Note updated successfully", "note": updated}
 
 
-@router.delete("/notes/{note_id}")
-def delete_note(note_id: str):
-    return {"message": "Note deleted successfully"}
+@router.delete("/notes/{serial_number}")
+def delete_note(request: Request, serial_number: int):
+    user_id = get_logged_in_user_id(request)
+    if not user_id:
+        return {"message": "no user is logged in"}
+
+    notes = read_file(_NOTES_FILE)
+    note = _find_note_by_serial(notes, user_id, serial_number)
+    if not note:
+        return {"message": "Note not found"}
+
+    note_id = note["note_id"]
+    notes = [stored for stored in notes if stored["note_id"] != note_id]
+    write_file(_NOTES_FILE, notes)
+    return {
+        "message": "Note deleted successfully",
+        "note": {**note, "serial_number": serial_number},
+    }
