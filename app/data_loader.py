@@ -7,6 +7,22 @@ from app.utils.storage import read_file, write_file
 _DATA_DIR = Path(__file__).parent / "data"
 _USERS_FILE = _DATA_DIR / "user.json"
 _NOTES_FILE = _DATA_DIR / "note.json"
+_DATA_FILES = [
+    "user.json",
+    "note.json",
+    "group.json",
+    "group_notes_list.json",
+    "note_voice.json",
+    "note_pictures.json",
+]
+
+
+def init_data_files() -> None:
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    for filename in _DATA_FILES:
+        path = _DATA_DIR / filename
+        if not path.exists():
+            write_file(path, [])
 
 
 def load_users() -> list[User]:
