@@ -1,7 +1,7 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from app.dependencies import get_logged_in_user_id
 from app.utils.storage import read_file, write_file
@@ -20,7 +20,19 @@ def _find_user_by_id(users: list, user_id: str):
 
 
 @router.post("/notes")
-def create_note(request: Request, title: str, body: str, is_pinned: bool = False):
+def create_note(
+    request: Request,
+    title: str,
+    body: str,
+    is_pinned: bool = Query(
+        default=False,
+        description="Pin the note. Defaults to false; set true to pin.",
+    ),
+    bg_color: str = Query(
+        default="#FFFFFF",
+        description="Background hex color (e.g. #E3F2FD). Defaults to #FFFFFF.",
+    ),
+):
     user_id = get_logged_in_user_id(request)
     if not user_id:
         return {"message": "no user is logged in"}
@@ -35,7 +47,7 @@ def create_note(request: Request, title: str, body: str, is_pinned: bool = False
         "user_id": user_id,
         "note_title": title,
         "note_body": body,
-        "bg_color": "#FFFFFF",
+        "bg_color": bg_color,
         "is_pinned": is_pinned,
     }
     notes.append(note)
