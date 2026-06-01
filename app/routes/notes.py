@@ -20,7 +20,7 @@ def _find_user_by_id(users: list, user_id: str):
 
 
 @router.post("/notes")
-def create_note(request: Request, title: str, body: str):
+def create_note(request: Request, title: str, body: str, is_pinned: bool = False):
     user_id = get_logged_in_user_id(request)
     if not user_id:
         return {"message": "no user is logged in"}
@@ -36,7 +36,7 @@ def create_note(request: Request, title: str, body: str):
         "note_title": title,
         "note_body": body,
         "bg_color": "#FFFFFF",
-        "is_pinned": False,
+        "is_pinned": is_pinned,
     }
     notes.append(note)
     write_file(_NOTES_FILE, notes)
@@ -51,6 +51,7 @@ def get_notes(request: Request):
 
     notes = read_file(_NOTES_FILE)
     user_notes = [note for note in notes if note["user_id"] == user_id]
+    user_notes.sort(key=lambda note: not note.get("is_pinned", False))
     return {"message": "Notes retrieved successfully", "notes": user_notes}
 
 
