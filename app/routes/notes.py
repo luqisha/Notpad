@@ -3,8 +3,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 
-from app.data_loader import load_notes, load_users, save_notes
-from app.dependencies import get_logged_in_user_id
+from app.utils.data_loader import load_notes, load_users, save_notes
+from app.utils.dependencies import get_logged_in_user_id
 from app.schemas.note import Note
 from app.schemas.user import User
 

@@ -4,7 +4,7 @@ from app.schemas.note import Note
 from app.schemas.user import User
 from app.utils.storage import read_file, write_file
 
-_DATA_DIR = Path(__file__).parent / "data"
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _USERS_FILE = _DATA_DIR / "user.json"
 _NOTES_FILE = _DATA_DIR / "note.json"
 _DATA_FILES = [

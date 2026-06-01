@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.data_loader import load_notes
+from app.utils.data_loader import load_notes
 from app.schemas.note import Note
 
 router = APIRouter(tags=["group"])
