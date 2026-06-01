@@ -38,5 +38,21 @@
     "note_body": "This is the first note",
     "bg_color": "#FFFFFF",
     "is_pinned": false
+  },
+  {
+    "note_id": "dd3a047d-4619-4bc4-a1f5-eb59076c1408",
+    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
+    "note_title": "Second Note",
+    "note_body": "This is the second note",
+    "bg_color": "#FFFFFF",
+    "is_pinned": false
+  },
+  {
+    "note_id": "ae2f2220-a3d4-4e94-92d0-046e4b0b4f35",
+    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
+    "note_title": "Second Note",
+    "note_body": "This is the second note",
+    "bg_color": "#FFFFFF",
+    "is_pinned": false
   }
 ]

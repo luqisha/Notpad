@@ -19,11 +19,6 @@ def _find_user_by_id(users: list, user_id: str):
     return None
 
 
-@router.get("/notes")
-def get_notes(user_id: str):
-    return {"message": "Notes retrieved successfully"}
-
-
 @router.post("/notes")
 def create_note(request: Request, title: str, body: str):
     user_id = get_logged_in_user_id(request)
@@ -48,9 +43,15 @@ def create_note(request: Request, title: str, body: str):
     return {"message": "Note created successfully", "note": note}
 
 
-@router.get("/notes/{note_id}")
-def get_note(note_id: str):
-    return {"message": "Note retrieved successfully"}
+@router.get("/notes")
+def get_notes(request: Request):
+    user_id = get_logged_in_user_id(request)
+    if not user_id:
+        return {"message": "no user is logged in"}
+
+    notes = read_file(_NOTES_FILE)
+    user_notes = [note for note in notes if note["user_id"] == user_id]
+    return {"message": "Notes retrieved successfully", "notes": user_notes}
 
 
 @router.patch("/notes/{note_id}")
