@@ -1,44 +1,57 @@
+import uuid
+from pathlib import Path
+
+import bcrypt
 from fastapi import APIRouter
 
-from app.data.user import USERS
+from app.utils.storage import read_file, write_file
+
+_USERS_FILE = Path(__file__).resolve().parent.parent / "data" / "user.json"
 
 router = APIRouter(tags=["auth"])
 
 
-def _find_user_by_mail(email: str):
-    for user in USERS:
+def _find_user_by_mail(users: list, email: str):
+    for user in users:
         if user["user_mail"] == email:
             return user
     return None
 
 
-def _next_user_id() -> str:
-    nums = [int(u["user_id"][1:]) for u in USERS if u["user_id"].startswith("u")]
-    return f"u{max(nums, default=0) + 1}"
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def _verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
 @router.post("/auth/register")
 def register(usermail: str, password: str):
-    if _find_user_by_mail(usermail):
+    users = read_file(_USERS_FILE)
+
+    if _find_user_by_mail(users, usermail):
         return {"message": "User already exists"}
 
-    USERS.append(
+    users.append(
         {
-            "user_id": _next_user_id(),
+            "user_id": str(uuid.uuid4()),
             "user_mail": usermail,
-            "user_pass": password,
+            "user_pass": _hash_password(password),
         }
     )
+    write_file(_USERS_FILE, users)
     return {"message": "User registered successfully"}
 
 
 @router.post("/auth/login")
 def login(usermail: str, password: str):
-    user = _find_user_by_mail(usermail)
+    users = read_file(_USERS_FILE)
+    user = _find_user_by_mail(users, usermail)
     if not user:
         return {"message": "User not found"}
 
-    if user["user_pass"] != password:
+    if not _verify_password(password, user["user_pass"]):
         return {"message": "Invalid password"}
 
     return {"message": "Login successful", "user_id": user["user_id"]}
