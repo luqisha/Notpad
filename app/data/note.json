@@ -8,35 +8,19 @@
     "is_pinned": false
   },
   {
-    "note_id": "dd3a047d-4619-4bc4-a1f5-eb59076c1408",
-    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
-    "note_title": "Second Note",
-    "note_body": "This is the second note",
-    "bg_color": "#FFFFFF",
-    "is_pinned": false
-  },
-  {
     "note_id": "ae2f2220-a3d4-4e94-92d0-046e4b0b4f35",
     "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
-    "note_title": "Second Note",
-    "note_body": "This is the second note",
-    "bg_color": "#FFFFFF",
-    "is_pinned": false
-  },
-  {
-    "note_id": "f6ec5c2c-5db1-49e8-82ec-a5ebdf890587",
-    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
-    "note_title": "Pinned Note",
-    "note_body": "This is a pinned note",
-    "bg_color": "#FFFFFF",
+    "note_title": "hi",
+    "note_body": "bye",
+    "bg_color": "#000000",
     "is_pinned": true
   },
   {
-    "note_id": "14e44b2b-ee40-49f0-9ab1-25311c4c2903",
-    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
-    "note_title": "Check BG Color",
-    "note_body": "This note is to change the bg-color",
-    "bg_color": "#AAAAAA",
+    "note_id": "12825643-a24f-426a-baaf-e83387880faa",
+    "user_id": "1fc99cee-6faf-460d-8673-00a0d62f60a4",
+    "note_title": "qwerty",
+    "note_body": "nothing",
+    "bg_color": "#FFFFFF",
     "is_pinned": true
   }
 ]
