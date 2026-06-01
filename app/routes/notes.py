@@ -1,34 +1,32 @@
 import uuid
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 
+from app.data_loader import load_notes, load_users, save_notes
 from app.dependencies import get_logged_in_user_id
-from app.utils.storage import read_file, write_file
-
-_NOTES_FILE = Path(__file__).resolve().parent.parent / "data" / "note.json"
-_USERS_FILE = Path(__file__).resolve().parent.parent / "data" / "user.json"
+from app.schemas.note import Note
+from app.schemas.user import User
 
 router = APIRouter(tags=["notes"])
 
 
-def _find_user_by_id(users: list, user_id: str):
+def _find_user_by_id(users: list[User], user_id: str) -> Optional[User]:
     for user in users:
-        if user["user_id"] == user_id:
+        if user.user_id == user_id:
             return user
     return None
 
 
-def _get_user_notes_sorted(notes: list, user_id: str) -> list:
-    user_notes = [note for note in notes if note["user_id"] == user_id]
-    user_notes.sort(key=lambda note: not note.get("is_pinned", False))
+def _get_user_notes_sorted(notes: list[Note], user_id: str) -> list[Note]:
+    user_notes = [note for note in notes if note.user_id == user_id]
+    user_notes.sort(key=lambda note: not note.is_pinned)
     return user_notes
 
 
-def _find_note_by_id(notes: list, user_id: str, note_id: str) -> Optional[dict]:
+def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
     for note in notes:
-        if note["note_id"] == note_id and note["user_id"] == user_id:
+        if note.note_id == note_id and note.user_id == user_id:
             return note
     return None
 
@@ -51,21 +49,21 @@ def create_note(
     if not user_id:
         return {"message": "no user is logged in"}
 
-    users = read_file(_USERS_FILE)
+    users = load_users()
     if not _find_user_by_id(users, user_id):
         return {"message": "User not found"}
 
-    notes = read_file(_NOTES_FILE)
-    note = {
-        "note_id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "note_title": title,
-        "note_body": body,
-        "bg_color": bg_color,
-        "is_pinned": is_pinned,
-    }
+    notes = load_notes()
+    note = Note(
+        note_id=str(uuid.uuid4()),
+        user_id=user_id,
+        note_title=title,
+        note_body=body,
+        bg_color=bg_color,
+        is_pinned=is_pinned,
+    )
     notes.append(note)
-    write_file(_NOTES_FILE, notes)
+    save_notes(notes)
     return {"message": "Note created successfully", "note": note}
 
 
@@ -75,7 +73,7 @@ def get_notes(request: Request):
     if not user_id:
         return {"message": "no user is logged in"}
 
-    notes = read_file(_NOTES_FILE)
+    notes = load_notes()
     user_notes = _get_user_notes_sorted(notes, user_id)
     return {"message": "Notes retrieved successfully", "notes": user_notes}
 
@@ -96,24 +94,28 @@ def update_note(
     if all(v is None for v in (title, body, bg_color, is_pinned)):
         return {"message": "No fields to update"}
 
-    notes = read_file(_NOTES_FILE)
-    if not _find_note_by_id(notes, user_id, note_id):
+    notes = load_notes()
+    existing = _find_note_by_id(notes, user_id, note_id)
+    if not existing:
         return {"message": "Note not found"}
 
-    for stored in notes:
-        if stored["note_id"] != note_id:
+    updates = {}
+    if title is not None:
+        updates["note_title"] = title
+    if body is not None:
+        updates["note_body"] = body
+    if bg_color is not None:
+        updates["bg_color"] = bg_color
+    if is_pinned is not None:
+        updates["is_pinned"] = is_pinned
+
+    for index, stored in enumerate(notes):
+        if stored.note_id != note_id:
             continue
-        if title is not None:
-            stored["note_title"] = title
-        if body is not None:
-            stored["note_body"] = body
-        if bg_color is not None:
-            stored["bg_color"] = bg_color
-        if is_pinned is not None:
-            stored["is_pinned"] = is_pinned
+        notes[index] = stored.model_copy(update=updates)
         break
 
-    write_file(_NOTES_FILE, notes)
+    save_notes(notes)
     updated = _find_note_by_id(notes, user_id, note_id)
     return {"message": "Note updated successfully", "note": updated}
 
@@ -124,11 +126,11 @@ def delete_note(request: Request, note_id: str):
     if not user_id:
         return {"message": "no user is logged in"}
 
-    notes = read_file(_NOTES_FILE)
+    notes = load_notes()
     note = _find_note_by_id(notes, user_id, note_id)
     if not note:
         return {"message": "Note not found"}
 
-    notes = [stored for stored in notes if stored["note_id"] != note_id]
-    write_file(_NOTES_FILE, notes)
+    notes = [stored for stored in notes if stored.note_id != note_id]
+    save_notes(notes)
     return {"message": "Note deleted successfully", "note": note}
