@@ -30,5 +30,13 @@
     "note_body": "Mon: run, Wed: gym, Fri: yoga",
     "bg_color": "#E8F5E9",
     "is_pinned": true
+  },
+  {
+    "note_id": "8cdaec31-e3ff-479c-9877-2ae9f18f75a7",
+    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
+    "note_title": "First Note",
+    "note_body": "This is the first note",
+    "bg_color": "#FFFFFF",
+    "is_pinned": false
   }
 ]

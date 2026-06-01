@@ -2,7 +2,7 @@ import uuid
 from pathlib import Path
 
 import bcrypt
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.utils.storage import read_file, write_file
 
@@ -45,7 +45,7 @@ def register(usermail: str, password: str):
 
 
 @router.post("/auth/login")
-def login(usermail: str, password: str):
+def login(request: Request, usermail: str, password: str):
     users = read_file(_USERS_FILE)
     user = _find_user_by_mail(users, usermail)
     if not user:
@@ -54,4 +54,11 @@ def login(usermail: str, password: str):
     if not _verify_password(password, user["user_pass"]):
         return {"message": "Invalid password"}
 
+    request.session["user_id"] = user["user_id"]
     return {"message": "Login successful", "user_id": user["user_id"]}
+
+
+@router.post("/auth/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"message": "Logged out successfully"}
