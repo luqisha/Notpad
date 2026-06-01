@@ -29,5 +29,5 @@ app/
   routes/          # API endpoints (one file per area)
     health.py      # example routes
 ```
-
 Add new route files under `app/routes/`, then register them in `app/main.py` with `app.include_router(...)`.
+

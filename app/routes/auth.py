@@ -1,19 +1,18 @@
 import uuid
-from pathlib import Path
 
 import bcrypt
 from fastapi import APIRouter, Request
+from pydantic import ValidationError
 
-from app.utils.storage import read_file, write_file
-
-_USERS_FILE = Path(__file__).resolve().parent.parent / "data" / "user.json"
+from app.data_loader import load_users, save_users
+from app.schemas.user import User, UserCreate
 
 router = APIRouter(tags=["auth"])
 
 
-def _find_user_by_mail(users: list, email: str):
+def _find_user_by_mail(users: list[User], email: str) -> User | None:
     for user in users:
-        if user["user_mail"] == email:
+        if user.user_mail == email:
             return user
     return None
 
@@ -28,34 +27,44 @@ def _verify_password(password: str, hashed: str) -> bool:
 
 @router.post("/auth/register")
 def register(usermail: str, password: str):
-    users = read_file(_USERS_FILE)
+    try:
+        credentials = UserCreate(user_mail=usermail, password=password)
+    except ValidationError as exc:
+        return {"message": "Invalid registration data", "errors": exc.errors()}
 
-    if _find_user_by_mail(users, usermail):
+    users = load_users()
+
+    if _find_user_by_mail(users, credentials.user_mail):
         return {"message": "User already exists"}
 
     users.append(
-        {
-            "user_id": str(uuid.uuid4()),
-            "user_mail": usermail,
-            "user_pass": _hash_password(password),
-        }
+        User(
+            user_id=str(uuid.uuid4()),
+            user_mail=credentials.user_mail,
+            user_pass=_hash_password(credentials.password),
+        )
     )
-    write_file(_USERS_FILE, users)
+    save_users(users)
     return {"message": "User registered successfully"}
 
 
 @router.post("/auth/login")
 def login(request: Request, usermail: str, password: str):
-    users = read_file(_USERS_FILE)
-    user = _find_user_by_mail(users, usermail)
+    try:
+        credentials = UserCreate(user_mail=usermail, password=password)
+    except ValidationError as exc:
+        return {"message": "Invalid login data", "errors": exc.errors()}
+
+    users = load_users()
+    user = _find_user_by_mail(users, credentials.user_mail)
     if not user:
         return {"message": "User not found"}
 
-    if not _verify_password(password, user["user_pass"]):
+    if not _verify_password(credentials.password, user.user_pass):
         return {"message": "Invalid password"}
 
-    request.session["user_id"] = user["user_id"]
-    return {"message": "Login successful", "user_id": user["user_id"]}
+    request.session["user_id"] = user.user_id
+    return {"message": "Login successful", "user_id": user.user_id}
 
 
 @router.post("/auth/logout")
