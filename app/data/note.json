@@ -54,5 +54,13 @@
     "note_body": "This is the second note",
     "bg_color": "#FFFFFF",
     "is_pinned": false
+  },
+  {
+    "note_id": "f6ec5c2c-5db1-49e8-82ec-a5ebdf890587",
+    "user_id": "aeee84ef-1ff4-48e4-9a92-70ccfe4d5242",
+    "note_title": "Pinned Note",
+    "note_body": "This is a pinned note",
+    "bg_color": "#FFFFFF",
+    "is_pinned": true
   }
 ]
