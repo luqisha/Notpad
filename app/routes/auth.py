@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from app.utils.data_loader import load_users, save_users
 from app.schemas.user import User, UserCreate
 
-router = APIRouter(tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _find_user_by_mail(users: list[User], email: str) -> User | None:
@@ -25,7 +25,7 @@ def _verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
-@router.post("/auth/register")
+@router.post("/register")
 def register(credentials: UserCreate):
     try:
         credentials = UserCreate(user_mail=credentials.user_mail, password=credentials.password)
@@ -48,7 +48,7 @@ def register(credentials: UserCreate):
     return {"message": "User registered successfully"}
 
 
-@router.post("/auth/login")
+@router.post("/login")
 def login(request: Request, credentials: UserCreate):
     try:
         credentials = UserCreate(user_mail=credentials.user_mail, password=credentials.password)
@@ -67,7 +67,7 @@ def login(request: Request, credentials: UserCreate):
     return {"message": "Login successful", "user_id": user.user_id}
 
 
-@router.post("/auth/logout")
+@router.post("/logout")
 def logout(request: Request):
     request.session.clear()
     return {"message": "Logged out successfully"}
