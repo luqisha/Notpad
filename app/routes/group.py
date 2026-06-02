@@ -1,6 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from app.data_loader import load_notes
+from app.utils.data_loader import load_notes
 from app.schemas.note import Note
 
 router = APIRouter(tags=["group"])
@@ -36,12 +36,12 @@ def delete_group(group_id: str):
 @router.post("/groups/{group_id}/notes")
 def create_group_note(group_id: str, note_id: str):
     if not _find_note_by_id(note_id):
-        return {"message": "Note not found"}
+        raise HTTPException(status_code=404, detail="Note not found")
     return {"message": "Group note created successfully"}
 
 
 @router.delete("/groups/{group_id}/notes/{note_id}")
 def delete_group_note(group_id: str, note_id: str):
     if not _find_note_by_id(note_id):
-        return {"message": "Note not found"}
+        raise HTTPException(status_code=404, detail="Note not found")
     return {"message": "Group note deleted successfully"}

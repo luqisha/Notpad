@@ -1,10 +1,10 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from app.data_loader import load_notes, load_users, save_notes
-from app.dependencies import get_logged_in_user_id
+from app.utils.data_loader import load_notes, load_users, save_notes
+from app.utils.dependencies import get_logged_in_user_id
 from app.schemas.note import Note
 from app.schemas.user import User
 
@@ -47,11 +47,11 @@ def create_note(
 ):
     user_id = get_logged_in_user_id(request)
     if not user_id:
-        return {"message": "no user is logged in"}
+        raise HTTPException(status_code=401, detail="Not logged in")
 
     users = load_users()
     if not _find_user_by_id(users, user_id):
-        return {"message": "User not found"}
+        raise HTTPException(status_code=404, detail="User not found")
 
     notes = load_notes()
     note = Note(
@@ -71,7 +71,7 @@ def create_note(
 def get_notes(request: Request):
     user_id = get_logged_in_user_id(request)
     if not user_id:
-        return {"message": "no user is logged in"}
+        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     user_notes = _get_user_notes_sorted(notes, user_id)
@@ -89,15 +89,15 @@ def update_note(
 ):
     user_id = get_logged_in_user_id(request)
     if not user_id:
-        return {"message": "no user is logged in"}
+        raise HTTPException(status_code=401, detail="Not logged in")
 
     if all(v is None for v in (title, body, bg_color, is_pinned)):
-        return {"message": "No fields to update"}
+        raise HTTPException(status_code=400, detail="No fields to update")
 
     notes = load_notes()
     existing = _find_note_by_id(notes, user_id, note_id)
     if not existing:
-        return {"message": "Note not found"}
+        raise HTTPException(status_code=404, detail="Note not found")
 
     updates = {}
     if title is not None:
@@ -124,12 +124,12 @@ def update_note(
 def delete_note(request: Request, note_id: str):
     user_id = get_logged_in_user_id(request)
     if not user_id:
-        return {"message": "no user is logged in"}
+        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     note = _find_note_by_id(notes, user_id, note_id)
     if not note:
-        return {"message": "Note not found"}
+        raise HTTPException(status_code=404, detail="Note not found")
 
     notes = [stored for stored in notes if stored.note_id != note_id]
     save_notes(notes)

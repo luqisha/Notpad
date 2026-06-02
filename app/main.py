@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.data_loader import init_data_files
+from app.utils.data_loader import init_data_files
 from app.routes import auth, notes, media, group
 
 init_data_files()
