@@ -6,11 +6,11 @@ from typing import Optional
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import ValidationError
 
-from backend.app.utils.data_loader import load_notes, load_users, save_notes, load_voices, load_pictures, save_voices, save_pictures
-from backend.app.utils.dependencies import get_logged_in_user_id
-from backend.app.schemas.media import Picture, Voice
-from backend.app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
-from backend.app.schemas.user import User
+from app.utils.data_loader import load_notes, load_users, save_notes, load_voices, load_pictures, save_voices, save_pictures
+from app.utils.dependencies import get_logged_in_user_id
+from app.schemas.media import Picture, Voice
+from app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
+from app.schemas.user import User
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 

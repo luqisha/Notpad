@@ -4,8 +4,8 @@ import bcrypt
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 
-from backend.app.utils.data_loader import load_users, save_users
-from backend.app.schemas.user import User, UserCreate
+from app.utils.data_loader import load_users, save_users
+from app.schemas.user import User, UserCreate
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

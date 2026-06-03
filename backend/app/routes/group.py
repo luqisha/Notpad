@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import ValidationError
 
-from backend.app.utils.data_loader import (
+from app.utils.data_loader import (
     load_notes,
     load_users,
     load_groups,
@@ -12,10 +12,10 @@ from backend.app.utils.data_loader import (
     load_group_notes_list,
     save_group_notes_list,
 )
-from backend.app.utils.dependencies import get_logged_in_user_id
-from backend.app.schemas.group import Group, GroupCreate, GroupUpdate, GroupNotesItem
-from backend.app.schemas.note import Note
-from backend.app.schemas.user import User
+from app.utils.dependencies import get_logged_in_user_id
+from app.schemas.group import Group, GroupCreate, GroupUpdate, GroupNotesItem
+from app.schemas.note import Note
+from app.schemas.user import User
 
 router = APIRouter(prefix="/groups", tags=["group"])
 
