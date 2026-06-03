@@ -9,10 +9,14 @@ import asyncio
 import time
 from fastapi.responses import PlainTextResponse, JSONResponse
 
-from app.utils.data_loader import init_data_files
-from app.routes import auth, notes, group
+from backend.app.utils.data_loader import init_data_files
+from backend.app.routes import notes
+from dotenv import load_dotenv
+
+from backend.app.routes import auth, group
 
 init_data_files()
+load_dotenv()
 
 app = FastAPI(title="Notpad")
 
@@ -53,9 +57,15 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         self.api_key = api_key
 
     async def dispatch(self, request, call_next):
+        
+        if self.api_key is None:
+            return JSONResponse({"detail": "API key not configured"}, status_code=500)
+        
+        
         path = request.url.path or ""
         whitelist_prefixes = (
             "/docs",
+            "/openapi.json",
         )
 
         if any(path.startswith(p) for p in whitelist_prefixes):
