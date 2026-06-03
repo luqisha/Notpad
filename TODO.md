@@ -1,12 +1,8 @@
 # Notpad — Restructuring TODO
 
-## 1. Proper HTTP Status Codes (High Priority)
+## ~~1. Proper HTTP Status Codes~~ DONE
 
-All errors currently return `200 OK` with message strings. Use proper codes.
-
-**Files:** `routes/notes.py`, `routes/auth.py`, `routes/group.py`, `routes/media.py`
-
-**Hint:** Replace `return {"message": "..."}` with `raise HTTPException(status_code=..., detail="...")`.
+All routes use `HTTPException` with proper codes:
 - 401 → not logged in, invalid password
 - 404 → user/note not found
 - 409 → user already exists
@@ -14,13 +10,14 @@ All errors currently return `200 OK` with message strings. Use proper codes.
 
 ---
 
-## 2. Auth Dependency via `Depends()` (High Priority)
+## 2. Auth Dependency via `Depends()` (High Priority) — PARTIAL
 
-Auth check duplicated in every route. Make it a proper FastAPI dependency that raises 401.
+`dependencies.py` exists with `get_logged_in_user_id` but returns `None` instead of raising 401.
+Routes call it manually and check the result — not used as a proper `Depends()` param.
 
-**File:** `dependencies.py`
+**File:** `app/utils/dependencies.py`
 
-**Hint:**
+**What's needed:** Change to raise 401 directly and wire via `Depends()`:
 ```python
 from fastapi import Depends, HTTPException, Request
 
@@ -34,64 +31,79 @@ Then in routes: `def create_note(user_id: str = Depends(require_user_id), ...):`
 
 ---
 
-## 3. Move Credentials to Request Body (Security)
+## ~~3. Move Credentials to Request Body~~ DONE
 
-`register` and `login` take password as query param — visible in URL, browser history, server logs.
-
-**File:** `routes/auth.py`
-
-**Hint:** `UserCreate` schema already exists. Use as function param:
-```python
-def register(credentials: UserCreate):
-```
-FastAPI auto-reads Pydantic model from JSON body, not URL.
+`auth.py` uses `credentials: UserCreate` — password in request body, not URL.
 
 ---
 
-## 4. Move Note Data to Request Body
+## ~~4. Move Note Data to Request Body~~ DONE
 
-`create_note` and `update_note` use `Query()` params for title/body. Should be request body.
-
-**File:** `routes/notes.py`, `schemas/note.py`
-
-**Hint:** Create `NoteCreate` and `NoteUpdate` schemas:
-```python
-class NoteCreate(BaseModel):
-    note_title: str = Field(min_length=10, max_length=100)
-    note_body: str = Field(max_length=1000)
-    bg_color: str = "#FFFFFF"
-    is_pinned: bool = False
-
-class NoteUpdate(BaseModel):
-    note_title: str | None = None
-    note_body: str | None = None
-    bg_color: str | None = None
-    is_pinned: bool | None = None
-```
-Then: `def create_note(data: NoteCreate, user_id: str = Depends(require_user_id)):`
+`NoteCreate` and `NoteUpdate` schemas exist in `schemas/note.py` and are used in `routes/notes.py`.
 
 ---
 
-## 5. Deduplicate `_find_note_by_id`
+## 5. Deduplicate `_find_note_by_id` (Still Open)
 
-Same helper exists in 3 files with slightly different signatures.
+Same helper still exists in two files with identical signatures:
+- `routes/notes.py:72`
+- `routes/group.py:23`
 
-**Files:** `routes/notes.py:27`, `routes/group.py:9`, `routes/media.py:9`
-
-**Hint:** Move to `data_loader.py` as single function:
+**Fix:** Move to `data_loader.py` as single function:
 ```python
-def find_note_by_id(notes: list[Note], note_id: str) -> Note | None:
-    return next((n for n in notes if n.note_id == note_id), None)
+def find_note_by_id(notes: list[Note], note_id: str, user_id: str) -> Note | None:
+    return next((n for n in notes if n.note_id == note_id and n.user_id == user_id), None)
 ```
-Import from `data_loader` in all three route files.
+Import from `data_loader` in both route files.
 
 ---
 
-## 6. Stub Endpoints — Decide Fate
+## ~~6. Stub Endpoints~~ DONE
 
-`group.py` and `media.py` endpoints return hardcoded messages, no real logic.
+`group.py` fully implemented with CRUD + note-group mappings.
+Media endpoints (images/voices) implemented in `routes/notes.py`.
 
-**Options:**
-- Remove if not planned
-- Keep but mark with `# TODO: implement` comments
-- Implement properly with data persistence
+---
+
+## 7. API Key Authentication (Security)
+
+Restrict all endpoints via global `Depends()` on the `FastAPI` app — no per-route changes needed, shows in OpenAPI docs.
+
+**File:** `app/utils/dependencies.py`, `app/main.py`
+
+```python
+# dependencies.py
+import os
+from fastapi import Header, HTTPException
+
+def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key != os.environ["API_KEY"]:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+```
+```python
+# main.py
+app = FastAPI(dependencies=[Depends(verify_api_key)])
+```
+
+Store key in env var, not hardcoded.
+
+---
+
+## 8. Rate Limiting (Security)
+
+Use **middleware** (`slowapi`) — needs request counting state, must intercept before route logic.
+
+**Install:** `pip install slowapi`
+
+```python
+# main.py
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+```
+
+Apply per-route or globally. Returns 429 on breach. Use Redis backend for multi-worker deployments.
