@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -9,11 +10,11 @@ import asyncio
 import time
 from fastapi.responses import PlainTextResponse, JSONResponse
 
-from backend.app.utils.data_loader import init_data_files
-from backend.app.routes import notes
+from app.utils.data_loader import init_data_files
+from app.routes import notes
 from dotenv import load_dotenv
 
-from backend.app.routes import auth, group
+from app.routes import auth, group
 
 init_data_files()
 load_dotenv()
@@ -23,6 +24,14 @@ app = FastAPI(title="Notpad")
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("SESSION_SECRET"),
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -49,7 +58,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         return response
 
-app.add_middleware(RateLimitMiddleware, limit=10, time_window=60)
+app.add_middleware(RateLimitMiddleware, limit=60, time_window=60)
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_key: str):
@@ -57,11 +66,12 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         self.api_key = api_key
 
     async def dispatch(self, request, call_next):
-        
+        if request.method == 'OPTIONS':
+            return await call_next(request)
+
         if self.api_key is None:
             return JSONResponse({"detail": "API key not configured"}, status_code=500)
-        
-        
+
         path = request.url.path or ""
         whitelist_prefixes = (
             "/docs",
@@ -70,7 +80,6 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
         if any(path.startswith(p) for p in whitelist_prefixes):
             return await call_next(request)
-
 
         api_key_header = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
 
