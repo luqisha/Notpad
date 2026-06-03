@@ -31,17 +31,6 @@ Then in routes: `def create_note(user_id: str = Depends(require_user_id), ...):`
 
 ---
 
-## ~~3. Move Credentials to Request Body~~ DONE
-
-`auth.py` uses `credentials: UserCreate` — password in request body, not URL.
-
----
-
-## ~~4. Move Note Data to Request Body~~ DONE
-
-`NoteCreate` and `NoteUpdate` schemas exist in `schemas/note.py` and are used in `routes/notes.py`.
-
----
 
 ## 5. Deduplicate `_find_note_by_id` (Still Open)
 
@@ -58,12 +47,6 @@ Import from `data_loader` in both route files.
 
 ---
 
-## ~~6. Stub Endpoints~~ DONE
-
-`group.py` fully implemented with CRUD + note-group mappings.
-Media endpoints (images/voices) implemented in `routes/notes.py`.
-
----
 
 ## 7. API Key Authentication (Security)
 
