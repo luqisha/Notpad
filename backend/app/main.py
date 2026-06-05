@@ -23,7 +23,7 @@ app = FastAPI(title="Notpad")
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("SESSION_SECRET"),
+    secret_key=os.environ.get("SESSION_SECRET", "dev-secret"),
 )
 
 app.add_middleware(
@@ -76,6 +76,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         whitelist_prefixes = (
             "/docs",
             "/openapi.json",
+            "/auth/register",
+            "/auth/login",
         )
 
         if any(path.startswith(p) for p in whitelist_prefixes):
@@ -88,7 +90,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
         return await call_next(request)
 
-app.add_middleware(APIKeyAuthMiddleware, api_key=os.environ.get("API_KEY"))
+api_key_value = os.environ.get("API_KEY")
+if api_key_value:
+    app.add_middleware(APIKeyAuthMiddleware, api_key=api_key_value)
 
 app.mount(
     "/uploads",
