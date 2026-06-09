@@ -1,46 +1,9 @@
 import { useEffect, useState } from 'react'
 import './App.css'
-
-function NoteForm({ initial, onCancel, onSave }) {
-	const [title, setTitle] = useState(initial?.title || '')
-	const [body, setBody] = useState(initial?.body || '')
-
-	function submit(e) {
-		e.preventDefault()
-		if (!title.trim() && !body.trim()) return
-		onSave({ ...initial, title: title.trim(), body: body.trim(), id: initial?.id })
-	}
-
-	return (
-		<div className="modal">
-			<form className="modal-content" onSubmit={submit}>
-				<div className="modal-header">
-					<h3>{initial ? 'Edit Note' : 'New Note'}</h3>
-				</div>
-				<label className="field">
-					Title
-					<input
-					placeholder="Give it a short title"
-					value={title}
-					onChange={e => setTitle(e.target.value)}
-				/>
-				</label>
-				<label className="field">
-					Body
-					<textarea
-					placeholder="Write your note here..."
-					value={body}
-					onChange={e => setBody(e.target.value)}
-				/>
-				</label>
-				<div className="modal-actions">
-					<button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
-					<button type="submit" className="btn primary">Save</button>
-				</div>
-			</form>
-		</div>
-	)
-}
+import NewNoteButton from './components/NewNoteButton'
+import SearchNotes from './components/SearchNotes'
+import NoteModal from './components/NoteModal'
+import NoteDisplay from './components/NoteDisplay'
 
 export default function App() {
 	const [notes, setNotes] = useState(() => {
@@ -94,7 +57,7 @@ export default function App() {
 					<h2>Notpad</h2>
 					<p className="subtitle">Fast, clean notes for everyday ideas.</p>
 				</div>
-				<button className="btn primary" onClick={() => { setIsOpen(true); setEditing(null) }}>New Note</button>
+				<NewNoteButton setIsOpen={setIsOpen} setEditing={setEditing} />
 			</header>
 
 			<main className="container">
@@ -103,17 +66,12 @@ export default function App() {
 						<strong>{notes.length}</strong> note{notes.length === 1 ? '' : 's'}
 						{notes.length > 0 && <span> • {filteredNotes.length} shown</span>}
 					</div>
-					<input
-						className="search"
-						placeholder="Search notes..."
-						value={search}
-						onChange={e => setSearch(e.target.value)}
-					/>
+					<SearchNotes value={search} onChange={setSearch} />
 				</div>
 
 				{notes.length === 0 ? (
 					<div className="empty-state">
-						<h3>Welcome to Notpad</h3>
+						<h3>No notes yet</h3>
 						<p>Start capturing your ideas with quick notes. Tap “New Note” when you’re ready.</p>
 					</div>
 				) : filteredNotes.length === 0 ? (
@@ -124,23 +82,19 @@ export default function App() {
 				) : (
 					<div className="notes">
 						{filteredNotes.map(note => (
-							<div className="note" key={note.id}>
-								<div className="note-body">
-									<strong className="note-title">{note.title || 'Untitled'}</strong>
-									<p className="note-text">{note.body || 'No content yet.'}</p>
-								</div>
-								<div className="note-actions">
-									<button className="btn ghost" onClick={() => handleEdit(note)}>Edit</button>
-									<button className="btn danger" onClick={() => handleDelete(note.id)}>Delete</button>
-								</div>
-							</div>
+							<NoteDisplay
+								key={note.id}
+								note={note}
+								onEdit={handleEdit}
+								onDelete={handleDelete}
+							/>
 						))}
 					</div>
 				)}
 			</main>
 
 			{isOpen && (
-				<NoteForm
+				<NoteModal
 					key={editing?.id ?? 'new'}
 					initial={editing}
 					onCancel={() => { setIsOpen(false); setEditing(null) }}
