@@ -146,7 +146,7 @@ def delete_group(request: Request, group_id: str):
 
 
 @router.post("/{group_id}/notes", status_code=status.HTTP_201_CREATED)
-def create_group_note(request: Request, group_id: str, note_id: str):
+def create_group_note(request: Request, group_id: str, note_id: str = None):
     user_id = get_logged_in_user_id(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")

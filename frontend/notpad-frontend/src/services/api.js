@@ -118,15 +118,62 @@ export const apiClient = {
   },
 
   addNoteToGroup(groupId, noteId) {
-    return this.request(`/groups/${groupId}/notes`, {
+    return this.request(`/groups/${groupId}/notes?note_id=${noteId}`, {
       method: 'POST',
-      body: JSON.stringify({ note_id: noteId }),
     });
   },
 
   removeNoteFromGroup(groupId, noteId) {
     return this.request(`/groups/${groupId}/notes/${noteId}`, {
       method: 'DELETE',
+    });
+  },
+
+  async uploadFile(noteId, file, fileType) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const headers = {
+      'X-API-Key': API_KEY,
+    };
+
+    const endpoint = fileType === 'image' ? `/notes/${noteId}/images` : `/notes/${noteId}/voices`;
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: formData,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const error = new Error(data.detail || 'Upload failed');
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+
+    return data;
+  },
+
+  uploadImage(noteId, file) {
+    return this.uploadFile(noteId, file, 'image');
+  },
+
+  uploadVoice(noteId, file) {
+    return this.uploadFile(noteId, file, 'voice');
+  },
+
+  getNoteImages(noteId) {
+    return this.request(`/notes/${noteId}/images`, {
+      method: 'GET',
+    });
+  },
+
+  getNoteVoices(noteId) {
+    return this.request(`/notes/${noteId}/voices`, {
+      method: 'GET',
     });
   },
 };

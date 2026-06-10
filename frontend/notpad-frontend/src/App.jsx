@@ -6,6 +6,8 @@ import NoteDisplay from './components/NoteDisplay'
 import ConfirmModal from './components/ConfirmModal'
 import Sidebar from './components/Sidebar'
 import Auth from './components/Auth'
+import GroupManager from './components/GroupManager'
+import GroupCreator from './components/GroupCreator'
 import { useAuth } from './context/AuthContext'
 import { apiClient } from './services/api'
 
@@ -22,6 +24,8 @@ export default function App() {
 	const [deleteCandidate, setDeleteCandidate] = useState(null)
 	const [loading, setLoading] = useState(true)
 	const [error, setError] = useState(null)
+	const [showGroupCreator, setShowGroupCreator] = useState(false)
+	const [editingGroup, setEditingGroup] = useState(null)
 
 	const notesRef = useRef(null)
 	const [columnsCount, setColumnsCount] = useState(0)
@@ -38,7 +42,29 @@ export default function App() {
 					apiClient.getNotes(),
 					apiClient.getGroups(),
 				])
-				setNotes(notesRes.notes || [])
+				let notesList = notesRes.notes || []
+
+				// Load images and voices for each note
+				const notesWithMedia = await Promise.all(
+					notesList.map(async (note) => {
+						try {
+							const [imagesRes, voicesRes] = await Promise.all([
+								apiClient.getNoteImages(note.note_id),
+								apiClient.getNoteVoices(note.note_id),
+							])
+							return {
+								...note,
+								images: imagesRes.images || [],
+								voices: voicesRes.voices || [],
+							}
+						} catch (err) {
+							console.error(`Failed to load media for note ${note.note_id}:`, err)
+							return note
+						}
+					})
+				)
+
+				setNotes(notesWithMedia)
 				setGroups(groupsRes.groups || [])
 			} catch (err) {
 				setError(err.message)
@@ -88,6 +114,8 @@ export default function App() {
 			id: note.note_id,
 			title: note.note_title,
 			body: note.note_body,
+			images: note.images || [],
+			voices: note.voices || [],
 		})
 		setIsOpen(true)
 	}
@@ -113,6 +141,28 @@ export default function App() {
 	function handleTabChange(tab) {
 		setActiveTab(tab)
 		setSelected(null)
+	}
+
+	function handleGroupCreated(newGroup) {
+		setGroups([...groups, newGroup])
+		setShowGroupCreator(false)
+	}
+
+	function handleGroupUpdated() {
+		// Refetch groups
+		apiClient.getGroups()
+			.then(res => setGroups(res.groups || []))
+			.catch(err => setError(err.message))
+		setEditingGroup(null)
+	}
+
+	function handleGroupDeleted() {
+		// Refetch groups
+		apiClient.getGroups()
+			.then(res => setGroups(res.groups || []))
+			.catch(err => setError(err.message))
+		setSelected(null)
+		setEditingGroup(null)
 	}
 
 	useEffect(() => {
@@ -169,7 +219,6 @@ export default function App() {
 				/>
 
 				<main className="main">
-
 					{activeTab === 'notes' ? (
 						selected && selected.type === 'note' ? (
 							(() => {
@@ -179,6 +228,40 @@ export default function App() {
 									<div className="note-full">
 										<h2>{note.note_title || 'Untitled'}</h2>
 										<p>{note.note_body}</p>
+										{(note.images?.length > 0 || note.voices?.length > 0) && (
+											<div className="media-section">
+												{note.images?.length > 0 && (
+													<div className="media-list">
+														<h4>Images ({note.images.length})</h4>
+														<div className="images-grid">
+															{note.images.map(img => (
+																<img
+																	key={img.id}
+																	src={img.picture_url}
+																	alt="Note"
+																	className="media-thumbnail"
+																	style={{cursor: 'pointer'}}
+																	onClick={() => window.open(img.picture_url)}
+																/>
+															))}
+														</div>
+													</div>
+												)}
+												{note.voices?.length > 0 && (
+													<div className="media-list">
+														<h4>Voices ({note.voices.length})</h4>
+														{note.voices.map(voice => (
+															<audio
+																key={voice.id}
+																src={voice.voice_url}
+																controls
+																className="media-audio"
+															/>
+														))}
+													</div>
+												)}
+											</div>
+										)}
 									</div>
 								)
 							})()
@@ -194,23 +277,23 @@ export default function App() {
 									<p>Try a different search term or create a new note.</p>
 								</div>
 							) : (
-										<>
-												<div ref={notesRef} className={`notes ${collapsed ? 'collapsed' : 'expanded'}`}>
-												{filteredNotes.map(note => (
-													<NoteDisplay
-														key={note.note_id}
-														note={{
-															id: note.note_id,
-															title: note.note_title,
-															body: note.note_body,
-														}}
-														onEdit={() => handleEdit(note)}
-														onDelete={() => handleDelete(note)}
-														onSelect={() => setSelected({ type: 'note', id: note.note_id })}
-													/>
-												))}
-											</div>
-										</>
+									<>
+										<div ref={notesRef} className={`notes ${collapsed ? 'collapsed' : 'expanded'}`}>
+											{filteredNotes.map(note => (
+												<NoteDisplay
+													key={note.note_id}
+													note={{
+														id: note.note_id,
+														title: note.note_title,
+														body: note.note_body,
+													}}
+													onEdit={() => handleEdit(note)}
+													onDelete={() => handleDelete(note)}
+													onSelect={() => setSelected({ type: 'note', id: note.note_id })}
+												/>
+											))}
+										</div>
+									</>
 							)
 						)
 					) : (
@@ -218,10 +301,46 @@ export default function App() {
 							(() => {
 								const group = groups.find(g => g.group_id === selected.id)
 								if (!group) return <div className="empty-state"><h3>Group not found</h3></div>
+								const groupNotes = notes.filter(n => group.note_ids?.includes(n.note_id))
 								return (
 									<div className="group-full">
-										<h2>{group.group_name}</h2>
-										<p>{group.group_description || 'No description'}</p>
+										<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '16px' }}>
+											<div>
+												<h2>{group.name || group.group_name || 'Untitled Group'}</h2>
+												<p>{group.description || group.group_description || 'No description'}</p>
+											</div>
+											<button
+												className="btn secondary"
+												onClick={() => setEditingGroup(group)}
+												style={{ whiteSpace: 'nowrap' }}
+											>
+												✎ Edit
+											</button>
+										</div>
+										{groupNotes.length === 0 ? (
+											<div style={{ marginTop: '20px', padding: '20px', textAlign: 'center', color: 'var(--subtle)' }}>
+												No notes in this group yet. Edit the group to add notes.
+											</div>
+										) : (
+											<div style={{ marginTop: '20px' }}>
+												<h4>Notes ({groupNotes.length})</h4>
+												<div ref={notesRef} className={`notes ${collapsed ? 'collapsed' : 'expanded'}`}>
+													{groupNotes.map(note => (
+														<NoteDisplay
+															key={note.note_id}
+															note={{
+																id: note.note_id,
+																title: note.note_title,
+																body: note.note_body,
+															}}
+															onEdit={() => handleEdit(note)}
+															onDelete={() => handleDelete(note)}
+															onSelect={() => setSelected({ type: 'note', id: note.note_id })}
+														/>
+													))}
+												</div>
+											</div>
+										)}
 									</div>
 								)
 							})()
@@ -230,23 +349,39 @@ export default function App() {
 								<div className="empty-state">
 									<h3>No groups yet</h3>
 									<p>Create a group to organize notes.</p>
+									<button className="btn primary" onClick={() => setShowGroupCreator(true)} style={{ marginTop: '16px' }}>
+										Create Group
+									</button>
 								</div>
 							) : (
-								<ul className="group-list">
-									{groups.map(g => (
-										<li
-											key={g.group_id}
-											className="group-item"
-											onClick={() => setSelected({ type: 'group', id: g.group_id })}
-										>
-											{g.group_name}
-										</li>
-									))}
-								</ul>
+								<div style={{ maxWidth: '800px', margin: '0 auto' }}>
+									<div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+										<h3>Your Groups</h3>
+										<button className="btn primary" onClick={() => setShowGroupCreator(true)}>
+											+ New Group
+										</button>
+									</div>
+									<ul className="group-list">
+										{groups.map(g => (
+											<li
+												key={g.group_id}
+												className="group-item"
+												onClick={() => setSelected({ type: 'group', id: g.group_id })}
+											>
+												<div>
+													<div style={{ fontWeight: '600', fontSize: '1.05rem' }}>{g.name || g.group_name}</div>
+													<div style={{ color: 'var(--subtle)', fontSize: '0.9rem', marginTop: '4px' }}>
+														{g.note_ids?.length || 0} notes
+													</div>
+												</div>
+											</li>
+										))}
+									</ul>
+								</div>
 							)
 						)
 					)}
-			</main>
+				</main>
 			</div>
 
 			{isOpen && (
@@ -258,18 +393,33 @@ export default function App() {
 				/>
 			)}
 
-		<ConfirmModal
-			isOpen={Boolean(deleteCandidate)}
-			message={
-				deleteCandidate
-					? `Delete "${deleteCandidate.note_title || 'Untitled'}"? This action cannot be undone.`
-					: 'Delete this note?'
-			}
-			onConfirm={confirmDelete}
-			onCancel={cancelDelete}
-		/>
+			{showGroupCreator && (
+				<GroupCreator
+					onCancel={() => setShowGroupCreator(false)}
+					onSuccess={handleGroupCreated}
+				/>
+			)}
+
+			{editingGroup && (
+				<GroupManager
+					group={editingGroup}
+					notes={notes}
+					onClose={() => setEditingGroup(null)}
+					onUpdate={handleGroupUpdated}
+					onDelete={handleGroupDeleted}
+				/>
+			)}
+
+			<ConfirmModal
+				isOpen={Boolean(deleteCandidate)}
+				message={
+					deleteCandidate
+						? `Delete "${deleteCandidate.note_title || 'Untitled'}"? This action cannot be undone.`
+						: 'Delete this note?'
+				}
+				onConfirm={confirmDelete}
+				onCancel={cancelDelete}
+			/>
 		</div>
 	)
 }
-
-
