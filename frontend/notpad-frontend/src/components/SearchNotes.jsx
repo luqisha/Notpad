@@ -5,7 +5,7 @@ export default function SearchNotes({ value, onChange, placeholder = 'Search not
 
   return (
     <input
-      className={["search", className].filter(Boolean).join(' ')}
+      className={['search', className].filter(Boolean).join(' ')}
       placeholder={placeholder}
       value={value}
       onChange={handleChange}

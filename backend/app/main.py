@@ -58,7 +58,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         return response
 
-app.add_middleware(RateLimitMiddleware, limit=60, time_window=60)
+app.add_middleware(RateLimitMiddleware, limit=60, time_window=1)
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_key: str):

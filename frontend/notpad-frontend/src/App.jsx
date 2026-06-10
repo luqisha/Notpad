@@ -8,6 +8,7 @@ import Sidebar from './components/Sidebar'
 import Auth from './components/Auth'
 import GroupManager from './components/GroupManager'
 import GroupCreator from './components/GroupCreator'
+import Pagination from './components/Pagination'
 import { useAuth } from './context/AuthContext'
 import { apiClient } from './services/api'
 
@@ -23,9 +24,14 @@ export default function App() {
 	const [editing, setEditing] = useState(null)
 	const [deleteCandidate, setDeleteCandidate] = useState(null)
 	const [loading, setLoading] = useState(true)
+	const [initialLoad, setInitialLoad] = useState(true)
 	const [error, setError] = useState(null)
 	const [showGroupCreator, setShowGroupCreator] = useState(false)
 	const [editingGroup, setEditingGroup] = useState(null)
+	const [currentPage, setCurrentPage] = useState(1)
+	const [pagination, setPagination] = useState(null)
+	const [reloadNotesKey, setReloadNotesKey] = useState(0)
+	const ITEMS_PER_PAGE = collapsed ? 15 : 12
 
 	const notesRef = useRef(null)
 	const [columnsCount, setColumnsCount] = useState(0)
@@ -38,8 +44,10 @@ export default function App() {
 			try {
 				setLoading(true)
 				setError(null)
+				const effectivePage = search.trim() ? 1 : currentPage
+				const skip = (effectivePage - 1) * ITEMS_PER_PAGE
 				const [notesRes, groupsRes] = await Promise.all([
-					apiClient.getNotes(),
+					apiClient.getNotes(skip, ITEMS_PER_PAGE, search),
 					apiClient.getGroups(),
 				])
 				let notesList = notesRes.notes || []
@@ -66,23 +74,24 @@ export default function App() {
 
 				setNotes(notesWithMedia)
 				setGroups(groupsRes.groups || [])
+				setPagination(notesRes.pagination)
 			} catch (err) {
 				setError(err.message)
 				console.error('Failed to fetch data:', err)
 			} finally {
 				setLoading(false)
+				setInitialLoad(false)
 			}
 		}
 
 		fetchData()
-	}, [user])
+	}, [user, currentPage, search, reloadNotesKey, collapsed])
 
-	const normalizedSearch = search.trim().toLowerCase()
-	const filteredNotes = notes.filter(note => {
-		if (!normalizedSearch) return true
-		return [note.note_title, note.note_body]
-			.some(value => value?.toLowerCase().includes(normalizedSearch))
-	})
+	useEffect(() => {
+		setCurrentPage(1)
+	}, [search])
+
+	const filteredNotes = notes
 
 	function handleSave(note) {
 		if (note.id) {
@@ -100,8 +109,13 @@ export default function App() {
 		} else {
 			// Create new note
 			apiClient.createNote(note.title, note.body)
-				.then(res => {
-					setNotes(n => [res.note, ...n])
+				.then(() => {
+					const currentTotal = pagination?.total ?? notes.length
+					const lastPage = Math.ceil((currentTotal + 1) / ITEMS_PER_PAGE)
+					if (!search.trim()) {
+						setCurrentPage(lastPage)
+					}
+					setReloadNotesKey(key => key + 1)
 					setIsOpen(false)
 					setEditing(null)
 				})
@@ -189,7 +203,7 @@ export default function App() {
 		return <Auth />
 	}
 
-	if (loading) {
+	if (loading && initialLoad) {
 		return <div className="loading">Loading your notes...</div>
 	}
 
@@ -293,6 +307,12 @@ export default function App() {
 												/>
 											))}
 										</div>
+										{pagination && !search && (
+											<Pagination
+												pagination={pagination}
+												onPageChange={setCurrentPage}
+											/>
+										)}
 									</>
 							)
 						)

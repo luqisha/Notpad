@@ -49,8 +49,12 @@ export const apiClient = {
   },
 
   // Notes
-  getNotes() {
-    return this.request('/notes', {
+  getNotes(skip = 0, limit = 12, query = '') {
+    const params = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+    if (query?.trim()) {
+      params.set('query', query.trim());
+    }
+    return this.request(`/notes?${params.toString()}`, {
       method: 'GET',
     });
   },

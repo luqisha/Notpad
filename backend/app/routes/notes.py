@@ -127,14 +127,46 @@ def create_note(request: Request, note: NoteCreate):
 
 
 @router.get("/")
-def get_notes(request: Request):
+def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[str] = None):
     user_id = get_logged_in_user_id(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
 
+    # Validate pagination parameters
+    if skip < 0:
+        skip = 0
+    if limit < 1 or limit > 100:
+        limit = 12
+
     notes = load_notes()
     user_notes = _get_user_notes_sorted(notes, user_id)
-    return {"message": "Notes retrieved successfully", "notes": user_notes}
+
+    if query:
+        normalized_query = query.strip().lower()
+        if normalized_query:
+            user_notes = [
+                note for note in user_notes
+                if normalized_query in (note.note_title or "").lower()
+                or normalized_query in (note.note_body or "").lower()
+            ]
+
+    # Calculate pagination
+    total = len(user_notes)
+    paginated_notes = user_notes[skip: skip + limit]
+
+    return {
+        "message": "Notes retrieved successfully",
+        "notes": paginated_notes,
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": total,
+            "page": skip // limit + 1,
+            "total_pages": (total + limit - 1) // limit,
+            "has_next": (skip + limit) < total,
+            "has_prev": skip > 0,
+        }
+    }
 
 
 @router.patch("/{note_id}")

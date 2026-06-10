@@ -10,14 +10,12 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 	const [voices, setVoices] = useState(initial?.voices || [])
 
 	useEffect(() => {
-		if (initial?.id && initial?.images?.length === 0) {
-			// Load images if not already loaded
+		if (initial?.id) {
+			// Always load images to ensure we have the picture_url
 			apiClient.getNoteImages(initial.id)
 				.then(res => setImages(res.images || []))
 				.catch(() => setImages([]))
-		}
-		if (initial?.id && initial?.voices?.length === 0) {
-			// Load voices if not already loaded
+			// Always load voices to ensure we have the voice_url
 			apiClient.getNoteVoices(initial.id)
 				.then(res => setVoices(res.voices || []))
 				.catch(() => setVoices([]))
