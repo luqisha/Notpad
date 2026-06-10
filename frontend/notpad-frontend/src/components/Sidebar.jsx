@@ -25,7 +25,7 @@ export default function Sidebar({
             onClick={() => setActiveTab('groups')}
             aria-pressed={activeTab === 'groups'}
           >
-            <span className="tab-label">Groupes</span>
+            <span className="tab-label">Groups</span>
             <span className="tab-abbrev">G</span>
           </button>
         </div>
