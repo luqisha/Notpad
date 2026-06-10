@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export default function Pagination({ pagination, onPageChange }) {
+export default function Pagination({ pagination, onPageChange, inline = false }) {
   if (!pagination || pagination.total_pages <= 1) {
     return null
   }
@@ -49,7 +49,7 @@ export default function Pagination({ pagination, onPageChange }) {
   }
 
   return (
-    <div className="pagination">
+    <div className={`pagination ${inline ? 'pagination-inline' : 'pagination-fixed'}`}>
       <button
         className="pagination-btn"
         onClick={() => onPageChange(page - 1)}

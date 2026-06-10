@@ -92,6 +92,8 @@ export default function App() {
 	}, [search])
 
 	const filteredNotes = notes
+	const showPagination = pagination && !search && pagination.total_pages > 1
+	const paginationInline = showPagination && notes.length === ITEMS_PER_PAGE
 
 	function handleSave(note) {
 		if (note.id) {
@@ -307,10 +309,11 @@ export default function App() {
 												/>
 											))}
 										</div>
-										{pagination && !search && (
+										{showPagination && (
 											<Pagination
 												pagination={pagination}
 												onPageChange={setCurrentPage}
+												inline={paginationInline}
 											/>
 										)}
 									</>
