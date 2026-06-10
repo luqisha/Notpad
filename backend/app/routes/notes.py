@@ -147,7 +147,6 @@ def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[
             user_notes = [
                 note for note in user_notes
                 if normalized_query in (note.note_title or "").lower()
-                or normalized_query in (note.note_body or "").lower()
             ]
 
     # Calculate pagination
