@@ -77,6 +77,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             "/docs",
             "/openapi.json",
         )
+        # Allow unauthenticated access to static uploads (image/voice files)
+        whitelist_prefixes = whitelist_prefixes + ("/uploads",)
 
         if any(path.startswith(p) for p in whitelist_prefixes):
             return await call_next(request)

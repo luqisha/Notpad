@@ -1,3 +1,14 @@
 [
- 
+  {
+    "picture_id": "b69c6b66-227f-4473-8b01-4c303732f1b7",
+    "note_id": "a2bfeaba-1c32-4f4f-98cc-c642fd06a648",
+    "user_id": "72a1e89b-9918-431b-848d-f7892741947d",
+    "picture_url": "http://localhost:8000/uploads/images/df50723d-1222-45b7-bfc7-4e0b47424084.webp"
+  },
+  {
+    "picture_id": "943afc88-5952-429b-912d-9170b95193b1",
+    "note_id": "e7fa1795-957c-45d2-9b71-97ea83e69fba",
+    "user_id": "72a1e89b-9918-431b-848d-f7892741947d",
+    "picture_url": "http://localhost:8000/uploads/images/bf6a5142-8dd5-43a5-a000-c7715ca7b946.webp"
+  }
 ]
