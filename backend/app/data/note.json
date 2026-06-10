@@ -1,3 +1,12 @@
 [
-
+  {
+    "note_title": "My First Note Title",
+    "note_body": "This is the body",
+    "bg_color": "#FFFFFF",
+    "is_pinned": false,
+    "note_id": "c371e319-968e-471f-b029-d95802c83658",
+    "user_id": "fea3340c-d160-4a6a-a251-95b48538a2d0",
+    "images": [],
+    "voices": []
+  }
 ]

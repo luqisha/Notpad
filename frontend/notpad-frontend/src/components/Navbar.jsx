@@ -1,6 +1,8 @@
 import SearchNotes from './SearchNotes'
+import { useAuth } from '../context/AuthContext'
 
 export default function Navbar({ search, setSearch, setIsOpen, setEditing, collapsed, setCollapsed }) {
+  const { logout } = useAuth()
   function handleLogoClick() {
     if (typeof setSearch === 'function') {
       setSearch('')
@@ -60,6 +62,9 @@ export default function Navbar({ search, setSearch, setIsOpen, setEditing, colla
         <div className="topbar-actions">
           <button className="btn primary" type="button" onClick={handleNewNote}>
             New Note
+          </button>
+          <button className="btn logout" type="button" onClick={logout}>
+            Logout
           </button>
         </div>
       </div>

@@ -5,60 +5,90 @@ import NoteModal from './components/NoteModal'
 import NoteDisplay from './components/NoteDisplay'
 import ConfirmModal from './components/ConfirmModal'
 import Sidebar from './components/Sidebar'
+import Auth from './components/Auth'
+import { useAuth } from './context/AuthContext'
+import { apiClient } from './services/api'
 
 export default function App() {
+	const { user, loading: authLoading } = useAuth()
 	const [activeTab, setActiveTab] = useState('notes')
 	const [collapsed, setCollapsed] = useState(false)
-	const [selected, setSelected] = useState(null) // {type: 'note'|'group', id}
-	const [groups] = useState(() => {
-		try {
-			const raw = localStorage.getItem('groups')
-			return raw ? JSON.parse(raw) : []
-		} catch {
-			return []
-		}
-	})
-
-	const [notes, setNotes] = useState(() => {
-		try {
-			const raw = localStorage.getItem('notes')
-			return raw ? JSON.parse(raw) : []
-		} catch {
-			return []
-		}
-	})
+	const [selected, setSelected] = useState(null)
+	const [groups, setGroups] = useState([])
+	const [notes, setNotes] = useState([])
 	const [search, setSearch] = useState('')
 	const [isOpen, setIsOpen] = useState(false)
 	const [editing, setEditing] = useState(null)
 	const [deleteCandidate, setDeleteCandidate] = useState(null)
+	const [loading, setLoading] = useState(true)
+	const [error, setError] = useState(null)
 
 	const notesRef = useRef(null)
 	const [columnsCount, setColumnsCount] = useState(0)
 
+	// Fetch notes and groups from backend
 	useEffect(() => {
-		localStorage.setItem('notes', JSON.stringify(notes))
-	}, [notes])
+		if (!user) return
+
+		const fetchData = async () => {
+			try {
+				setLoading(true)
+				setError(null)
+				const [notesRes, groupsRes] = await Promise.all([
+					apiClient.getNotes(),
+					apiClient.getGroups(),
+				])
+				setNotes(notesRes.notes || [])
+				setGroups(groupsRes.groups || [])
+			} catch (err) {
+				setError(err.message)
+				console.error('Failed to fetch data:', err)
+			} finally {
+				setLoading(false)
+			}
+		}
+
+		fetchData()
+	}, [user])
 
 	const normalizedSearch = search.trim().toLowerCase()
 	const filteredNotes = notes.filter(note => {
 		if (!normalizedSearch) return true
-		return [note.title, note.body]
+		return [note.note_title, note.note_body]
 			.some(value => value?.toLowerCase().includes(normalizedSearch))
 	})
 
 	function handleSave(note) {
 		if (note.id) {
-			setNotes(n => n.map(x => (x.id === note.id ? { ...x, title: note.title, body: note.body } : x)))
+			// Update existing note
+			apiClient.updateNote(note.id, {
+				note_title: note.title,
+				note_body: note.body,
+			})
+				.then(res => {
+					setNotes(n => n.map(x => (x.note_id === note.id ? res.note : x)))
+					setIsOpen(false)
+					setEditing(null)
+				})
+				.catch(err => setError(err.message))
 		} else {
-			const id = Date.now().toString()
-			setNotes(n => [{ id, title: note.title, body: note.body }, ...n])
+			// Create new note
+			apiClient.createNote(note.title, note.body)
+				.then(res => {
+					setNotes(n => [res.note, ...n])
+					setIsOpen(false)
+					setEditing(null)
+				})
+				.catch(err => setError(err.message))
 		}
-		setIsOpen(false)
-		setEditing(null)
 	}
 
 	function handleEdit(note) {
-		setEditing(note)
+		setEditing({
+			id: note.note_id,
+			title: note.note_title,
+			body: note.note_body,
+		})
 		setIsOpen(true)
 	}
 
@@ -68,8 +98,12 @@ export default function App() {
 
 	function confirmDelete() {
 		if (!deleteCandidate) return
-		setNotes(n => n.filter(x => x.id !== deleteCandidate.id))
-		setDeleteCandidate(null)
+		apiClient.deleteNote(deleteCandidate.note_id)
+			.then(() => {
+				setNotes(n => n.filter(x => x.note_id !== deleteCandidate.note_id))
+				setDeleteCandidate(null)
+			})
+			.catch(err => setError(err.message))
 	}
 
 	function cancelDelete() {
@@ -81,21 +115,33 @@ export default function App() {
 		setSelected(null)
 	}
 
-useEffect(() => {
-	function updateColumns() {
-		const el = notesRef.current
-		if (!el) return
-		const gap = 16
-		const containerWidth = el.clientWidth
-		const minWidth = 240
-		const cols = Math.max(1, Math.floor((containerWidth + gap) / (minWidth + gap)))
-		setColumnsCount(cols)
+	useEffect(() => {
+		function updateColumns() {
+			const el = notesRef.current
+			if (!el) return
+			const gap = 16
+			const containerWidth = el.clientWidth
+			const minWidth = 240
+			const cols = Math.max(1, Math.floor((containerWidth + gap) / (minWidth + gap)))
+			setColumnsCount(cols)
+		}
+
+		updateColumns()
+		window.addEventListener('resize', updateColumns)
+		return () => window.removeEventListener('resize', updateColumns)
+	}, [collapsed, notesRef, notes.length])
+
+	if (authLoading) {
+		return <div className="loading">Loading...</div>
 	}
 
-	updateColumns()
-	window.addEventListener('resize', updateColumns)
-	return () => window.removeEventListener('resize', updateColumns)
-}, [collapsed, notesRef, notes.length])
+	if (!user) {
+		return <Auth />
+	}
+
+	if (loading) {
+		return <div className="loading">Loading your notes...</div>
+	}
 
 	return (
 		<div className="app">
@@ -107,6 +153,8 @@ useEffect(() => {
 				collapsed={collapsed}
 				setCollapsed={setCollapsed}
 			/>
+
+			{error && <div className="error-banner">{error}</div>}
 
 			<div className="content">
 				<Sidebar
@@ -125,12 +173,12 @@ useEffect(() => {
 					{activeTab === 'notes' ? (
 						selected && selected.type === 'note' ? (
 							(() => {
-								const note = notes.find(n => n.id === selected.id)
+								const note = notes.find(n => n.note_id === selected.id)
 								if (!note) return <div className="empty-state"><h3>Note not found</h3></div>
 								return (
 									<div className="note-full">
-										<h2>{note.title || 'Untitled'}</h2>
-										<p>{note.body}</p>
+										<h2>{note.note_title || 'Untitled'}</h2>
+										<p>{note.note_body}</p>
 									</div>
 								)
 							})()
@@ -138,7 +186,7 @@ useEffect(() => {
 							notes.length === 0 ? (
 								<div className="empty-state">
 									<h3>No notes yet</h3>
-									<p>Start capturing your ideas with quick notes. Tap “New Note” when you’re ready.</p>
+									<p>Start capturing your ideas with quick notes. Tap "New Note" when you're ready.</p>
 								</div>
 							) : filteredNotes.length === 0 ? (
 								<div className="empty-state">
@@ -150,11 +198,15 @@ useEffect(() => {
 												<div ref={notesRef} className={`notes ${collapsed ? 'collapsed' : 'expanded'}`}>
 												{filteredNotes.map(note => (
 													<NoteDisplay
-														key={note.id}
-														note={note}
-														onEdit={handleEdit}
-														onDelete={handleDelete}
-														onSelect={() => setSelected({ type: 'note', id: note.id })}
+														key={note.note_id}
+														note={{
+															id: note.note_id,
+															title: note.note_title,
+															body: note.note_body,
+														}}
+														onEdit={() => handleEdit(note)}
+														onDelete={() => handleDelete(note)}
+														onSelect={() => setSelected({ type: 'note', id: note.note_id })}
 													/>
 												))}
 											</div>
@@ -164,12 +216,12 @@ useEffect(() => {
 					) : (
 						selected && selected.type === 'group' ? (
 							(() => {
-								const group = groups.find(g => g.id === selected.id)
+								const group = groups.find(g => g.group_id === selected.id)
 								if (!group) return <div className="empty-state"><h3>Group not found</h3></div>
 								return (
 									<div className="group-full">
-										<h2>{group.name}</h2>
-										<p>{group.description || 'No description'}</p>
+										<h2>{group.group_name}</h2>
+										<p>{group.group_description || 'No description'}</p>
 									</div>
 								)
 							})()
@@ -183,11 +235,11 @@ useEffect(() => {
 								<ul className="group-list">
 									{groups.map(g => (
 										<li
-											key={g.id}
+											key={g.group_id}
 											className="group-item"
-											onClick={() => setSelected({ type: 'group', id: g.id })}
+											onClick={() => setSelected({ type: 'group', id: g.group_id })}
 										>
-											{g.name}
+											{g.group_name}
 										</li>
 									))}
 								</ul>
@@ -210,7 +262,7 @@ useEffect(() => {
 			isOpen={Boolean(deleteCandidate)}
 			message={
 				deleteCandidate
-					? `Delete "${deleteCandidate.title || 'Untitled'}"? This action cannot be undone.`
+					? `Delete "${deleteCandidate.note_title || 'Untitled'}"? This action cannot be undone.`
 					: 'Delete this note?'
 			}
 			onConfirm={confirmDelete}
@@ -219,4 +271,5 @@ useEffect(() => {
 		</div>
 	)
 }
+
 
