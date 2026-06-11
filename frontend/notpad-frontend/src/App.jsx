@@ -273,6 +273,7 @@ export default function App() {
 			setNotes(n => n.map(x => (x.note_id === noteId ? { ...x, ...updatedNote } : x)))
 			setViewDraft({ title: updatedNote.note_title || '', body: updatedNote.note_body || '' })
 			setViewDraftHtml(bodyToHtml(updatedNote.note_body || '', { ...activeNote, ...updatedNote }))
+			setSelected(null)
 		} catch (err) {
 			setError(err.message)
 		} finally {
@@ -280,64 +281,25 @@ export default function App() {
 		}
 	}
 
-	function handleEditorInput() {
+	function handleEditorInput(e) {
 		if (!editorRef.current) return
-		const html = editorRef.current.innerHTML
-		const body = htmlToBody(html)
-		setViewDraftHtml(html)
-		setViewDraft(draft => draft ? { ...draft, body } : { title: '', body })
+		const value = e.target.value
+		setViewDraftHtml(bodyToHtml(value, activeNote || {}))
+		setViewDraft(draft => draft ? { ...draft, body: value } : { title: '', body: value })
 	}
 
 	function handleEditorClick(event) {
-		const target = event.target
-		if (target && target.tagName === 'IMG' && target.dataset.placeholder) {
-			event.preventDefault()
-			const placeholder = target.dataset.placeholder
-			const width = parseInt(target.style.width, 10) || target.naturalWidth || 300
-			setSelectedMediaPlaceholder(placeholder)
-			setSelectedMediaWidth(width)
-			return
-		}
+		// With a simple textarea we don't support clicking embedded images.
 		setSelectedMediaPlaceholder(null)
 		setSelectedMediaWidth(null)
 	}
 
-	function handleImageMouseDown(e) {
-		if (!editorRef.current) return
-		const img = e.target
-		if (img.tagName !== 'IMG' || !img.dataset.placeholder) return
-
-		const startX = e.clientX
-		const startWidth = parseInt(img.style.width, 10) || img.naturalWidth || 300
-
-		function handleMouseMove(moveEvent) {
-			const delta = moveEvent.clientX - startX
-			const newWidth = Math.max(80, startWidth + delta)
-			img.style.width = `${newWidth}px`
-			const placeholder = img.dataset.placeholder
-			updateImageInHtml(placeholder, newWidth)
-		}
-
-		function handleMouseUp() {
-			document.removeEventListener('mousemove', handleMouseMove)
-			document.removeEventListener('mouseup', handleMouseUp)
-			if (editorRef.current) {
-				const html = editorRef.current.innerHTML
-				const body = htmlToBody(html)
-				setViewDraftHtml(html)
-				setViewDraft(draft => draft ? { ...draft, body } : { title: '', body })
-			}
-		}
-
-		document.addEventListener('mousemove', handleMouseMove)
-		document.addEventListener('mouseup', handleMouseUp)
+	function handleImageMouseDown() {
+		// Not applicable for plain textarea editor.
 	}
 
-	function updateImageInHtml(placeholder, width) {
-		if (!editorRef.current) return
-		const img = editorRef.current.querySelector(`img[data-placeholder="${placeholder}"]`)
-		if (!img) return
-		img.style.width = `${width}px`
+	function updateImageInHtml() {
+		// Not applicable for plain textarea editor.
 	}
 
 	async function handleUploadImageForActiveNote(event) {
@@ -354,13 +316,10 @@ export default function App() {
 				const res = await apiClient.uploadImage(noteId, file)
 				const placeholder = res.placeholder
 				const image = res.image
-				const src = image.picture_url || image.image_url || image.url
-				if (placeholder && src) {
-					const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${src}" style="max-width:100%; display:block; margin:12px 0;" />`
-					insertHtmlAtCursor(imgHtml)
+				if (placeholder) {
+					insertTextAtCursor(placeholder)
 				}
-				const html = editorRef.current.innerHTML
-				const body = htmlToBody(html)
+				const body = editorRef.current.value
 				const updatedNote = await apiClient.updateNote(noteId, { note_body: body })
 				setNotes(n => n.map(x => {
 					if (x.note_id !== noteId) return x
@@ -383,27 +342,29 @@ export default function App() {
 		}
 	}
 
-	function insertHtmlAtCursor(html) {
+	function insertTextAtCursor(text) {
 		if (!editorRef.current) return
-		editorRef.current.focus()
-		const selection = window.getSelection()
-		if (!selection || selection.rangeCount === 0) {
-			editorRef.current.insertAdjacentHTML('beforeend', html)
-			return
+		const el = editorRef.current
+		el.focus()
+		const start = el.selectionStart || 0
+		const end = el.selectionEnd || 0
+		const value = el.value || ''
+		const newValue = value.slice(0, start) + text + value.slice(end)
+		el.value = newValue
+		const cursorPos = start + text.length
+		setViewDraft(draft => draft ? { ...draft, body: newValue } : { title: '', body: newValue })
+		setViewDraftHtml(bodyToHtml(newValue, activeNote || {}))
+		setTimeout(() => {
+			el.selectionStart = el.selectionEnd = cursorPos
+			el.focus()
+		}, 0)
+	}
+
+	function handleEditorKeyDown(e) {
+		if (e.key === 'Tab') {
+			e.preventDefault()
+			insertTextAtCursor('  ')
 		}
-		const range = selection.getRangeAt(0)
-		if (!editorRef.current.contains(range.commonAncestorContainer)) {
-			editorRef.current.insertAdjacentHTML('beforeend', html)
-			return
-		}
-		const fragment = range.createContextualFragment(html)
-		range.deleteContents()
-		range.insertNode(fragment)
-		selection.removeAllRanges()
-		const newRange = document.createRange()
-		newRange.setStartAfter(fragment.lastChild || fragment)
-		newRange.collapse(true)
-		selection.addRange(newRange)
 	}
 
 	function updateSelectedImageWidth(width) {
@@ -543,30 +504,13 @@ export default function App() {
 								{detailUploadError && <div className="modal-error" style={{ marginTop: '8px' }}>{detailUploadError}</div>}
 							</div>
 							<div className="note-body-editor-wrapper">
-								<div
+								<textarea
 									ref={editorRef}
 									className="note-body-editor"
-									contentEditable
 									dir="ltr"
-									onInput={handleEditorInput}
-									onClick={handleEditorClick}
-									onMouseDown={handleImageMouseDown}
-									onKeyDown={(e) => {
-										if (e.key === 'Tab') {
-											e.preventDefault()
-											const selection = window.getSelection()
-											if (selection && selection.rangeCount > 0) {
-												const range = selection.getRangeAt(0)
-												const tabNode = document.createTextNode('  ')
-												range.insertNode(tabNode)
-												range.setStartAfter(tabNode)
-												range.collapse(true)
-												selection.removeAllRanges()
-												selection.addRange(range)
-											}
-										}
-									}}
-									dangerouslySetInnerHTML={{ __html: viewDraftHtml }}
+									value={viewDraft?.body ?? ''}
+									onChange={handleEditorInput}
+									onKeyDown={handleEditorKeyDown}
 								/>
 								{selectedMediaPlaceholder && (
 									<div className="selected-media-controls">

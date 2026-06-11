@@ -786,9 +786,8 @@ button {
 	color: #000;
 	outline: none;
 	transition: border-color 150ms ease, box-shadow 150ms ease;
-	direction: ltr !important;
-	text-align: left !important;
-	unicode-bidi: bidi-override !important;
+	direction: ltr;
+	text-align: left;
 }
 
 .field input:focus,
@@ -1207,6 +1206,8 @@ button {
 	word-wrap: break-word;
 	word-break: break-word;
 	white-space: pre-wrap;
+	color: #000;
+	width: 100%;
 }
 
 .note-body-editor:focus {
