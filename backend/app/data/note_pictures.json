@@ -4,5 +4,53 @@
     "note_id": "cbd6b6f0-62cf-4381-98d1-47b96bb74725",
     "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
     "picture_url": "http://localhost:8000/uploads/images/91523617-dc7f-4523-a7b0-ed2950fe1dec.webp"
+  },
+  {
+    "picture_id": "ec607b99-d2ab-4cc4-9836-0dcefb07bd54",
+    "note_id": "e57e52cb-bb9b-48b4-869e-b9c2aac628f9",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/b9bd2f63-71b2-4ef9-8d14-0ee8e25ce6c7.webp"
+  },
+  {
+    "picture_id": "7931a91d-503a-4114-a2d0-d15636f74dda",
+    "note_id": "eded4c6c-4143-4bfd-a01d-b82e449de51d",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/c5ccd015-7d1a-4785-a2dc-4f5a6cb38734.webp"
+  },
+  {
+    "picture_id": "341c3efb-f1b8-4034-bdab-e1bb5f14cef9",
+    "note_id": "eded4c6c-4143-4bfd-a01d-b82e449de51d",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/3fe76d5f-c93c-47f8-83e2-b26343feb1dd.webp"
+  },
+  {
+    "picture_id": "5af027b6-123b-4cdc-9277-46121039b6c7",
+    "note_id": "e022f01f-0638-4018-bdb9-74e8853d59bf",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/78dc4502-632e-4885-9d1e-eff1959851d9.webp"
+  },
+  {
+    "picture_id": "0eddb4c8-3369-4f7e-ba7a-3cf608116756",
+    "note_id": "3d9905ee-5cb9-4e8c-9196-1c356969b879",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/fd3a0b48-d457-4187-a1dc-84bb61902b31.webp"
+  },
+  {
+    "picture_id": "20f61b9b-5439-4a2b-833b-e703d0f4165c",
+    "note_id": "f55b9c11-e89d-41cf-8792-fd29fa9ba41f",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/8d265fac-80a4-479d-8e39-07e99d389cbc.webp"
+  },
+  {
+    "picture_id": "13312526-6fef-4b6c-9b66-37cf04a5e400",
+    "note_id": "263addbb-440a-4850-8b80-3eba86f86f81",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/0fe8cc1d-13c7-480a-b061-21fc20dc0803.webp"
+  },
+  {
+    "picture_id": "779fb908-7b5b-44ef-83ad-477de92af689",
+    "note_id": "40c3fd9b-0c9c-48e2-88c7-d8d2a68c7d54",
+    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
+    "picture_url": "http://localhost:8000/uploads/images/0ca6c08b-4445-4b35-950e-b1e885d4c905.webp"
   }
 ]

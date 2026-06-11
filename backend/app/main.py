@@ -19,6 +19,7 @@ from app.routes import auth, group
 init_data_files()
 load_dotenv()
 
+
 app = FastAPI(title="Notpad")
 
 app.add_middleware(

@@ -59,7 +59,36 @@ export const apiClient = {
     });
   },
 
-  createNote(title, body) {
+  async createNote(title, body, imageFiles = []) {
+    if (imageFiles && imageFiles.length > 0) {
+      const formData = new FormData();
+      formData.append('note_title', title);
+      formData.append('note_body', body);
+      formData.append('bg_color', '#FFFFFF');
+      formData.append('is_pinned', 'false');
+
+      imageFiles.forEach(imageFile => formData.append('images', imageFile.file));
+
+      const response = await fetch(`${API_BASE_URL}/notes/with-images`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'X-API-Key': API_KEY,
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        const error = new Error(data.detail || 'API Error');
+        error.status = response.status;
+        error.data = data;
+        throw error;
+      }
+
+      return data;
+    }
+
     return this.request('/notes', {
       method: 'POST',
       body: JSON.stringify({

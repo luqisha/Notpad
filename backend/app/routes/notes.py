@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import ValidationError
 
 from app.utils.data_loader import load_notes, load_users, save_notes, load_voices, load_pictures, save_voices, save_pictures
@@ -13,7 +13,6 @@ from app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
 from app.schemas.user import User
 
 router = APIRouter(prefix="/notes", tags=["notes"])
-
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 IMAGE_UPLOAD_DIR = UPLOADS_DIR / "images"
 VOICE_UPLOAD_DIR = UPLOADS_DIR / "voices"
@@ -62,13 +61,6 @@ def _find_user_by_id(users: list[User], user_id: str) -> Optional[User]:
     return None
 
 
-def _get_user_notes_sorted(notes: list[Note], user_id: str) -> list[Note]:
-    user_notes = [note for note in notes if note.user_id == user_id]
-    #user_notes.sort(key=lambda note: not note.is_pinned)
-    print(f" This is {user_id}")
-    return user_notes
-
-
 def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
     for note in notes:
         if note.note_id == note_id and note.user_id == user_id:
@@ -99,6 +91,70 @@ def _raise_validation_error(exc: Exception) -> None:
             errors.append(f"{field}: {msg}")
         raise HTTPException(status_code=422, detail={"validation_errors": errors})
     raise HTTPException(status_code=422, detail={"validation_errors": [str(exc)]})
+
+
+@router.post("/with-images")
+def create_note_with_images(
+    request: Request,
+    note_title: str = Form(...),
+    note_body: str = Form(...),
+    bg_color: str = Form("#FFFFFF"),
+    is_pinned: str = Form("false"),
+    images: Optional[list] = File(None),
+):
+    user_id = get_logged_in_user_id(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    users = load_users()
+    if not _find_user_by_id(users, user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    notes = load_notes()
+    image_references: list[MediaReference] = []
+    image_body = note_body
+    pictures = load_pictures()
+
+    # Convert string to boolean
+    is_pinned_bool = is_pinned.lower() in ("true", "1", "yes")
+
+    try:
+        note = Note(
+            note_id=str(uuid.uuid4()),
+            user_id=user_id,
+            note_title=note_title,
+            note_body=note_body,
+            bg_color=bg_color,
+            is_pinned=is_pinned_bool,
+            images=[],
+            voices=[],
+        )
+    except (ValidationError, ValueError) as exc:
+        _raise_validation_error(exc)
+
+    if images:
+        for file in images:
+            filename = _save_upload_file(file, IMAGE_UPLOAD_DIR)
+            image_url = _make_upload_url(request, f"images/{filename}")
+            picture = Picture(
+                picture_id=str(uuid.uuid4()),
+                note_id=note.note_id,
+                user_id=user_id,
+                picture_url=image_url,
+            )
+            pictures.append(picture)
+
+            next_index = _get_next_image_index(note)
+            placeholder = _make_media_placeholder("image", next_index)
+            image_body = f"{image_body} {placeholder}".strip()
+            image_references.append(MediaReference(index=next_index, id=picture.picture_id))
+            note = note.model_copy(update={"note_body": image_body, "images": image_references})
+
+        save_pictures(pictures)
+
+    notes.append(note)
+    save_notes(notes)
+    return {"message": "Note created successfully", "note": note}
 
 
 @router.post("/")
@@ -138,20 +194,35 @@ def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[
     if limit < 1 or limit > 100:
         limit = 12
 
-    notes = load_notes()
-    user_notes = _get_user_notes_sorted(notes, user_id)
-
+    
+    # Filter notes for current user only
+    normalized_query = None
     if query:
         normalized_query = query.strip().lower()
-        if normalized_query:
-            user_notes = [
-                note for note in user_notes
-                if normalized_query in (note.note_title or "").lower()
-            ]
+    
+    # Load fresh notes from file
+    notes = load_notes()
+    
+    # Single pass: filter user notes and search, collect only what we need
+    user_notes = []
+    total = 0
+    
+    for note in notes:
+        if note.user_id != user_id:
+            continue
+        
+        # Apply search filter if provided
+        if normalized_query and normalized_query not in (note.note_title or "").lower():
+            continue
+        
+        total += 1
+        
+        # Collect only the notes needed for this page
+        if total > skip and len(user_notes) < limit:
+            user_notes.append(note)
 
     # Calculate pagination
-    total = len(user_notes)
-    paginated_notes = user_notes[skip: skip + limit]
+    paginated_notes = user_notes
 
     return {
         "message": "Notes retrieved successfully",
