@@ -204,6 +204,12 @@ export const apiClient = {
     });
   },
 
+  deleteImage(noteId, imageId) {
+    return this.request(`/notes/${noteId}/images/${imageId}`, {
+      method: 'DELETE',
+    });
+  },
+
   getNoteVoices(noteId) {
     return this.request(`/notes/${noteId}/voices`, {
       method: 'GET',

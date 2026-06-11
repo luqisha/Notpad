@@ -74,7 +74,7 @@ function bodyToHtml(body = '', note = {}) {
       if (!src) return `<span class="note-placeholder">${escapeHtml(match)}</span>`
       const widthStyle = meta.width ? `width:${meta.width}px;` : 'max-width:100%;'
       const dataPlaceholder = serializePlaceholder(type, Number(index), meta)
-      return `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}" style="${widthStyle} display:block; margin:12px 0;" />`
+      return `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}" style="${widthStyle} vertical-align:middle; margin:4px;" />`
     }
     if (type === 'AUD') {
       const src = findVoiceUrlByIndex(note, Number(index))
@@ -131,13 +131,19 @@ export default function App() {
 	const [viewDraftHtml, setViewDraftHtml] = useState('')
 	const [selectedMediaPlaceholder, setSelectedMediaPlaceholder] = useState(null)
 	const [selectedMediaWidth, setSelectedMediaWidth] = useState(null)
+	const [editorKey, setEditorKey] = useState(0)
 	const [currentPage, setCurrentPage] = useState(1)
 	const [pagination, setPagination] = useState(null)
 	const [reloadNotesKey, setReloadNotesKey] = useState(0)
+	const [isResizing, setIsResizing] = useState(false)
 	const ITEMS_PER_PAGE = collapsed ? 15 : 12
 
 	const notesRef = useRef(null)
 	const editorRef = useRef(null)
+	const selectedImageEl = useRef(null)
+	const resizeStartPos = useRef({ x: 0, w: 0, aspect: 1 })
+	const savedRangeRef = useRef(null)
+	const [handlePos, setHandlePos] = useState(null)
 
 	// Fetch notes and groups from backend
 	useEffect(() => {
@@ -209,7 +215,10 @@ export default function App() {
 		if (note) {
 			const body = note.note_body || ''
 			setViewDraft({ title: note.note_title, body })
-			setViewDraftHtml(bodyToHtml(body, note))
+			const html = bodyToHtml(body, note)
+			setViewDraftHtml(html)
+			// eslint-disable-next-line react-hooks/set-state-in-effect
+			setEditorKey(k => k + 1)
 		} else {
 			setViewDraft(null)
 			setViewDraftHtml('')
@@ -223,47 +232,22 @@ export default function App() {
 	const activeNote = selected?.type === 'note' ? notes.find(n => n.note_id === selected.id) : null
 	const hasDraftChanges = activeNote && viewDraft && (activeNote.note_title !== viewDraft.title || activeNote.note_body !== viewDraft.body)
 
-	function handleSave(note) {
-		if (note.id) {
-			// Update existing note
-			apiClient.updateNote(note.id, {
-				note_title: note.title,
-				note_body: note.body,
-			})
-				.then(res => {
-					setNotes(n => n.map(x => (x.note_id === note.id ? res.note : x)))
-					setIsOpen(false)
-					setEditing(null)
-					setActiveTab('notes')
-					setSelected(null)
-				})
-				.catch(err => setError(err.message))
-		} else {
-			// Create new note
-			const imageFiles = note.pendingImages || []
-			apiClient.createNote(note.title, note.body, imageFiles)
-				.then(() => {
-					const currentTotal = pagination?.total ?? notes.length
-					const lastPage = Math.ceil((currentTotal + 1) / ITEMS_PER_PAGE)
-					if (!search.trim()) {
-						setCurrentPage(lastPage)
-					}
-					setReloadNotesKey(key => key + 1)
-					setIsOpen(false)
-					setEditing(null)
-					setActiveTab('notes')
-					setSelected(null)
-				})
-				.catch(err => setError(err.message))
-		}
+	function handleSave() {
+		setReloadNotesKey(key => key + 1)
+		setIsOpen(false)
+		setEditing(null)
+		setActiveTab('notes')
+		setSelected(null)
 	}
 
 	async function handleSaveViewNote() {
-		if (!activeNote || !viewDraft) return
+		if (!activeNote || !editorRef.current) return
 		const noteId = activeNote.note_id
+		const html = editorRef.current.innerHTML
+		const body = htmlToBody(html)
 		const updates = {
-			note_title: viewDraft.title,
-			note_body: viewDraft.body,
+			note_title: viewDraft?.title || '',
+			note_body: body,
 		}
 		setError(null)
 		setDetailUploading(true)
@@ -281,25 +265,126 @@ export default function App() {
 		}
 	}
 
-	function handleEditorInput(e) {
+	function handleEditorInput() {
 		if (!editorRef.current) return
-		const value = e.target.value
-		setViewDraftHtml(bodyToHtml(value, activeNote || {}))
-		setViewDraft(draft => draft ? { ...draft, body: value } : { title: '', body: value })
+		const html = editorRef.current.innerHTML
+		const body = htmlToBody(html)
+		setViewDraft(draft => draft ? { ...draft, body } : { title: '', body })
 	}
 
 	function handleEditorClick(event) {
-		// With a simple textarea we don't support clicking embedded images.
+		const img = event.target.closest('.editor-image')
+		if (img && img.dataset.placeholder) {
+			const width = parseInt(img.style.width) || 300
+			selectedImageEl.current = img
+			setSelectedMediaPlaceholder(img.dataset.placeholder)
+			setSelectedMediaWidth(width)
+			editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
+			img.classList.add('selected-image')
+			return
+		}
+		selectedImageEl.current = null
+		setHandlePos(null)
+		editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
 		setSelectedMediaPlaceholder(null)
 		setSelectedMediaWidth(null)
 	}
 
+	function handleResizeMouseDown(e) {
+		e.preventDefault()
+		e.stopPropagation()
+		const img = selectedImageEl.current
+		if (!img) return
+		const currentWidth = parseInt(img.style.width) || Math.min(img.naturalWidth || 300, 800)
+		resizeStartPos.current = { x: e.clientX, w: currentWidth, aspect: (img.naturalWidth / img.naturalHeight) || 1 }
+		setIsResizing(true)
+		document.body.style.cursor = 'nwse-resize'
+		document.body.style.userSelect = 'none'
+	}
+
+	useEffect(() => {
+		if (!isResizing) return
+		function onMouseMove(e) {
+			const img = selectedImageEl.current
+			if (!img) return
+			const dx = e.clientX - resizeStartPos.current.x
+			const newWidth = Math.max(80, Math.min(1200, resizeStartPos.current.w + dx))
+			const newHeight = Math.round(newWidth / resizeStartPos.current.aspect)
+			img.style.width = `${newWidth}px`
+			img.style.height = `${newHeight}px`
+		}
+		function onMouseUp() {
+			setIsResizing(false)
+			document.body.style.cursor = ''
+			document.body.style.userSelect = ''
+			if (selectedImageEl.current && selectedMediaPlaceholder) {
+				const w = parseInt(selectedImageEl.current.style.width)
+				updateSelectedImageWidth(w || 300)
+			}
+		}
+		window.addEventListener('mousemove', onMouseMove)
+		window.addEventListener('mouseup', onMouseUp)
+		return () => {
+			window.removeEventListener('mousemove', onMouseMove)
+			window.removeEventListener('mouseup', onMouseUp)
+		}
+	}, [isResizing])
+
 	function handleImageMouseDown() {
-		// Not applicable for plain textarea editor.
+		// Handled via click on editor-image in contentEditable
 	}
 
 	function updateImageInHtml() {
-		// Not applicable for plain textarea editor.
+		// Handled via contentEditable directly
+	}
+
+	function saveCursorPosition() {
+		const sel = window.getSelection()
+		if (sel.rangeCount > 0 && editorRef.current) {
+			const range = sel.getRangeAt(0)
+			if (editorRef.current.contains(range.commonAncestorContainer)) {
+				savedRangeRef.current = range.cloneRange()
+			}
+		}
+	}
+
+	function insertHtmlAtCursor(editor, html) {
+		editor.focus()
+		const selection = window.getSelection()
+		let range
+		if (!selection.rangeCount) {
+			if (savedRangeRef.current) {
+				range = savedRangeRef.current.cloneRange()
+				selection.addRange(range)
+			} else {
+				range = document.createRange()
+				range.setStart(editor, 0)
+				range.collapse(true)
+				selection.addRange(range)
+			}
+		} else {
+			range = selection.getRangeAt(0)
+			if (!editor.contains(range.commonAncestorContainer)) {
+				if (savedRangeRef.current) {
+					range = savedRangeRef.current.cloneRange()
+					selection.removeAllRanges()
+					selection.addRange(range)
+				} else {
+					range.selectNodeContents(editor)
+					range.collapse(false)
+				}
+			}
+			range.deleteContents()
+		}
+		const fragment = range.createContextualFragment(html)
+		const lastNode = fragment.lastChild
+		range.insertNode(fragment)
+		if (lastNode) {
+			range.setStartAfter(lastNode)
+			range.collapse(true)
+		}
+		selection.removeAllRanges()
+		selection.addRange(range)
 	}
 
 	async function handleUploadImageForActiveNote(event) {
@@ -317,14 +402,15 @@ export default function App() {
 				const placeholder = res.placeholder
 				const image = res.image
 				if (placeholder) {
-					insertTextAtCursor(placeholder)
+					const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${image.picture_url}" style="max-width:100%; vertical-align:middle; margin:4px;" />`
+					insertHtmlAtCursor(editorRef.current, imgHtml)
 				}
-				const body = editorRef.current.value
-				const updatedNote = await apiClient.updateNote(noteId, { note_body: body })
+				const html = editorRef.current.innerHTML
+				const body = htmlToBody(html)
 				setNotes(n => n.map(x => {
 					if (x.note_id !== noteId) return x
 					return {
-						...updatedNote,
+						...x,
 						mediaImages: [
 							...(x.mediaImages || []),
 							image,
@@ -332,60 +418,107 @@ export default function App() {
 						mediaVoices: x.mediaVoices || [],
 					}
 				}))
-				setViewDraft(draft => draft ? { ...draft, body } : { title: updatedNote.note_title || '', body })
-				setViewDraftHtml(bodyToHtml(body, { ...updatedNote, mediaImages: [...(activeNote?.mediaImages || []), image] }))
+				setViewDraft(draft => draft ? { ...draft, body } : { title: '', body })
 			}
 		} catch (err) {
 			setDetailUploadError(err.message || 'Failed to upload image')
 		} finally {
 			setDetailUploading(false)
+			event.target.value = ''
 		}
-	}
-
-	function insertTextAtCursor(text) {
-		if (!editorRef.current) return
-		const el = editorRef.current
-		el.focus()
-		const start = el.selectionStart || 0
-		const end = el.selectionEnd || 0
-		const value = el.value || ''
-		const newValue = value.slice(0, start) + text + value.slice(end)
-		el.value = newValue
-		const cursorPos = start + text.length
-		setViewDraft(draft => draft ? { ...draft, body: newValue } : { title: '', body: newValue })
-		setViewDraftHtml(bodyToHtml(newValue, activeNote || {}))
-		setTimeout(() => {
-			el.selectionStart = el.selectionEnd = cursorPos
-			el.focus()
-		}, 0)
 	}
 
 	function handleEditorKeyDown(e) {
 		if (e.key === 'Tab') {
 			e.preventDefault()
-			insertTextAtCursor('  ')
+			const sel = window.getSelection()
+			if (!sel.rangeCount) return
+			const range = sel.getRangeAt(0)
+			if (!editorRef.current || !editorRef.current.contains(range.commonAncestorContainer)) return
+			range.deleteContents()
+			const textNode = document.createTextNode('  ')
+			range.insertNode(textNode)
+			range.setStartAfter(textNode)
+			range.collapse(true)
+			sel.removeAllRanges()
+			sel.addRange(range)
+			handleEditorInput()
 		}
 	}
 
 	function updateSelectedImageWidth(width) {
 		if (!selectedMediaPlaceholder || !editorRef.current) return
-		const image = editorRef.current.querySelector(`img[data-placeholder="${selectedMediaPlaceholder}"]`)
+		const image = editorRef.current.querySelector(`img[data-placeholder="${CSS.escape(selectedMediaPlaceholder)}"]`)
 		if (!image) return
-		const [base, meta] = selectedMediaPlaceholder.split('|')
-		const newPlaceholder = meta ? `${base}|w=${width}` : `${base}|w=${width}`
+		const aspect = (image.naturalWidth / image.naturalHeight) || 1
+		const height = Math.round(width / aspect)
+		const [typeIndex, meta] = selectedMediaPlaceholder.split('|')
+		const newPlaceholder = meta ? `${typeIndex}|w=${width}` : `${typeIndex}|w=${width}`
 		image.style.width = `${width}px`
+		image.style.height = `${height}px`
 		image.dataset.placeholder = newPlaceholder
 		setSelectedMediaPlaceholder(newPlaceholder)
 		setSelectedMediaWidth(width)
 		const html = editorRef.current.innerHTML
 		const body = htmlToBody(html)
-		setViewDraftHtml(html)
+		const note = notes.find(n => n.note_id === selected?.id)
+		setViewDraftHtml(bodyToHtml(body, note || {}))
 		setViewDraft(draft => draft ? { ...draft, body } : { title: '', body })
 	}
 
+	useEffect(() => {
+		if (!selectedMediaPlaceholder || !selectedImageEl.current) {
+			setHandlePos(null)
+			return
+		}
+		function updatePos() {
+			const img = selectedImageEl.current
+			if (!img || !editorRef.current) return
+			const imgRect = img.getBoundingClientRect()
+			const wrapper = img.closest('.note-body-editor-wrapper') || editorRef.current.parentElement
+			if (!wrapper) return
+			const wrapperRect = wrapper.getBoundingClientRect()
+			setHandlePos({
+				top: imgRect.bottom - wrapperRect.top - 8,
+				left: imgRect.right - wrapperRect.left - 8,
+			})
+		}
+		updatePos()
+		window.addEventListener('scroll', updatePos, true)
+		window.addEventListener('resize', updatePos)
+		const obs = new ResizeObserver(updatePos)
+		if (editorRef.current) obs.observe(editorRef.current)
+		return () => {
+			window.removeEventListener('scroll', updatePos, true)
+			window.removeEventListener('resize', updatePos)
+			obs.disconnect()
+		}
+	}, [selectedMediaPlaceholder, selectedMediaWidth])
+
 	function clearSelectedMedia() {
+		selectedImageEl.current = null
+		setHandlePos(null)
+		editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
 		setSelectedMediaPlaceholder(null)
 		setSelectedMediaWidth(null)
+	}
+
+	async function handleRemoveImage(noteId, imageId) {
+		try {
+			const res = await apiClient.deleteImage(noteId, imageId)
+			const updatedNote = res.note
+			setNotes(n => n.map(x => {
+				if (x.note_id !== noteId) return x
+				return {
+					...x,
+					note_body: updatedNote.note_body,
+					images: updatedNote.images || [],
+					mediaImages: (x.mediaImages || []).filter(img => img.picture_id !== imageId && img.id !== imageId),
+				}
+			}))
+		} catch (err) {
+			setError(err.message)
+		}
 	}
 
 	function handleDelete(note) {
@@ -489,7 +622,7 @@ export default function App() {
 								</button>
 							</div>
 							<div className="media-section" style={{ margin: '18px 0' }}>
-								<label className="btn secondary" style={{ marginRight: '12px' }}>
+								<label className="btn secondary" style={{ marginRight: '12px' }} onMouseDown={saveCursorPosition}>
 									📷 Add Image
 									<input
 										type="file"
@@ -504,30 +637,30 @@ export default function App() {
 								{detailUploadError && <div className="modal-error" style={{ marginTop: '8px' }}>{detailUploadError}</div>}
 							</div>
 							<div className="note-body-editor-wrapper">
-								<textarea
+								<div
+									key={editorKey}
 									ref={editorRef}
-									className="note-body-editor"
+									className="note-body-editor ce-editor"
+									contentEditable
+									suppressContentEditableWarning
 									dir="ltr"
-									value={viewDraft?.body ?? ''}
-									onChange={handleEditorInput}
+									onInput={handleEditorInput}
+									onClick={handleEditorClick}
 									onKeyDown={handleEditorKeyDown}
+									onMouseUp={saveCursorPosition}
+									onKeyUp={saveCursorPosition}
 								/>
-								{selectedMediaPlaceholder && (
-									<div className="selected-media-controls">
-										<div className="selected-media-label">Resize selected image</div>
-										<input
-											type="range"
-											min="80"
-											max="800"
-											value={selectedMediaWidth || 300}
-											onChange={(e) => updateSelectedImageWidth(Number(e.target.value))}
-										/>
-										<div>{selectedMediaWidth || 300}px</div>
-										<button type="button" className="btn ghost" onClick={clearSelectedMedia}>
-											Done
-										</button>
-									</div>
+								{handlePos && !isResizing && (
+									<div
+										className="image-resize-handle"
+										style={{ top: handlePos.top, left: handlePos.left }}
+										onMouseDown={handleResizeMouseDown}
+									/>
 								)}
+								{isResizing && (
+									<div className="image-resize-overlay" />
+								)}
+
 							</div>
 						</div>
 					) : (
@@ -553,6 +686,7 @@ notes.length === 0 ? (
 													note={note}
 													onDelete={() => handleDelete(note)}
 													onSelect={() => setSelected({ type: 'note', id: note.note_id })}
+													onRemoveImage={handleRemoveImage}
 												/>
 											))}
 										</div>
@@ -599,9 +733,9 @@ notes.length === 0 ? (
 														<NoteDisplay
 															key={note.note_id}
 															note={note}
-
 															onDelete={() => handleDelete(note)}
 															onSelect={() => setSelected({ type: 'note', id: note.note_id })}
+															onRemoveImage={handleRemoveImage}
 														/>
 													))}
 												</div>

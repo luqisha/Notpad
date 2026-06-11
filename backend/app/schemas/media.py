@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 from urllib.parse import urlparse
 import os
@@ -33,6 +34,7 @@ class Picture(BaseModel):
     note_id: str
     user_id: str
     picture_url: str
+    file_hash: Optional[str] = None
 
     @field_validator("picture_id", "note_id", "user_id")
     @classmethod

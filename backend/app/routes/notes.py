@@ -1,7 +1,10 @@
+import hashlib
+import re
 import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import ValidationError
@@ -22,16 +25,20 @@ def _make_upload_url(request: Request, subpath: str) -> str:
     return str(request.base_url).rstrip("/") + f"/uploads/{subpath}"
 
 
-def _save_upload_file(file: UploadFile, target_dir: Path) -> str:
+def _save_upload_file(file: UploadFile, target_dir: Path) -> tuple[str, str]:
     target_dir.mkdir(parents=True, exist_ok=True)
     extension = Path(file.filename).suffix
     if not extension:
         raise HTTPException(status_code=400, detail="Uploaded file must have a valid file extension")
     filename = f"{uuid.uuid4()}{extension}"
     destination = target_dir / filename
+    sha256 = hashlib.sha256()
     with destination.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    return filename
+        while chunk := file.file.read(8192):
+            sha256.update(chunk)
+            buffer.write(chunk)
+    file_hash = sha256.hexdigest()
+    return filename, file_hash
 
 
 def _make_media_placeholder(media_type: str, index: int) -> str:
@@ -134,13 +141,14 @@ def create_note_with_images(
 
     if images:
         for file in images:
-            filename = _save_upload_file(file, IMAGE_UPLOAD_DIR)
+            filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR)
             image_url = _make_upload_url(request, f"images/{filename}")
             picture = Picture(
                 picture_id=str(uuid.uuid4()),
                 note_id=note.note_id,
                 user_id=user_id,
                 picture_url=image_url,
+                file_hash=file_hash,
             )
             pictures.append(picture)
 
@@ -296,42 +304,71 @@ def upload_note_image(request: Request, note_id: str, file: UploadFile = File(..
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    filename = _save_upload_file(file, IMAGE_UPLOAD_DIR)
+    filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR)
     image_url = _make_upload_url(request, f"images/{filename}")
-    picture = Picture(
-        picture_id=str(uuid.uuid4()),
-        note_id=note_id,
-        user_id=user_id,
-        picture_url=image_url,
-    )
 
     pictures = load_pictures()
-    pictures.append(picture)
-    save_pictures(pictures)
 
-    # Get next image index for this note
-    next_index = _get_next_image_index(note)
+    # Check for duplicate image in the same note by file hash
+    existing = None
+    for pic in pictures:
+        if pic.note_id == note_id and pic.file_hash == file_hash:
+            existing = pic
+            # Remove the just-saved duplicate file
+            (IMAGE_UPLOAD_DIR / filename).unlink(missing_ok=True)
+            break
+
+    if existing:
+        picture = existing
+        # Find the existing index from note references
+        next_index = None
+        for ref in note.images:
+            if ref.id == picture.picture_id:
+                next_index = ref.index
+                break
+        if next_index is None:
+            next_index = _get_next_image_index(note)
+    else:
+        picture = Picture(
+            picture_id=str(uuid.uuid4()),
+            note_id=note_id,
+            user_id=user_id,
+            picture_url=image_url,
+            file_hash=file_hash,
+        )
+        pictures.append(picture)
+        save_pictures(pictures)
+
+        next_index = _get_next_image_index(note)
+        placeholder = _make_media_placeholder("image", next_index)
+
+        # Update note with new image reference and placeholder
+        for idx, stored in enumerate(notes):
+            if stored.note_id != note_id:
+                continue
+            new_body = f"{stored.note_body} {placeholder}" if stored.note_body else placeholder
+            new_images = stored.images + [MediaReference(index=next_index, id=picture.picture_id)]
+            notes[idx] = stored.model_copy(update={
+                "note_body": new_body,
+                "images": new_images
+            })
+            updated_note = notes[idx]
+            break
+        save_notes(notes)
+
+        return {
+            "message": "Image uploaded successfully",
+            "image": picture,
+            "placeholder": placeholder,
+            "note": updated_note,
+        }
+
     placeholder = _make_media_placeholder("image", next_index)
-    
-    # Update note with new image reference and placeholder
-    for idx, stored in enumerate(notes):
-        if stored.note_id != note_id:
-            continue
-        new_body = f"{stored.note_body} {placeholder}" if stored.note_body else placeholder
-        new_images = stored.images + [MediaReference(index=next_index, id=picture.picture_id)]
-        notes[idx] = stored.model_copy(update={
-            "note_body": new_body,
-            "images": new_images
-        })
-        updated_note = notes[idx]
-        break
-    save_notes(notes)
-
     return {
-        "message": "Image uploaded successfully",
+        "message": "Image already exists in this note",
         "image": picture,
         "placeholder": placeholder,
-        "note": updated_note,
+        "note": note,
     }
 
 
@@ -347,7 +384,7 @@ def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(..
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    filename = _save_upload_file(file, VOICE_UPLOAD_DIR)
+    filename, _ = _save_upload_file(file, VOICE_UPLOAD_DIR)
     voice_url = _make_upload_url(request, f"voices/{filename}")
     voice = Voice(
         voice_id=str(uuid.uuid4()),
@@ -454,3 +491,56 @@ def get_note_image(request: Request, note_id: str, image_id: str):
         raise HTTPException(status_code=404, detail="Image not found")
 
     return {"message": "Image retrieved successfully", "image": picture}
+
+
+@router.delete("/{note_id}/images/{image_id}")
+def delete_note_image(request: Request, note_id: str, image_id: str):
+    """Delete an image from a note."""
+    user_id = get_logged_in_user_id(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+
+    notes = load_notes()
+    note = _find_note_by_id(notes, user_id, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    pictures = load_pictures()
+    picture = _find_picture_by_id(pictures, user_id, image_id)
+    if not picture or picture.note_id != note_id:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    # Remove the file from disk
+    picture_path = urlparse(picture.picture_url).path
+    image_file = IMAGE_UPLOAD_DIR / Path(picture_path).name
+    image_file.unlink(missing_ok=True)
+
+    # Remove picture record
+    pictures = [p for p in pictures if p.picture_id != image_id]
+    save_pictures(pictures)
+
+    # Find the image index from note references and remove it
+    removed_index = None
+    for ref in note.images:
+        if ref.id == image_id:
+            removed_index = ref.index
+            break
+
+    # Update note: remove image reference and placeholder from body
+    new_images = [ref for ref in note.images if ref.id != image_id]
+    new_body = note.note_body
+    if removed_index is not None:
+        new_body = re.sub(rf'\[IMG:{removed_index}[^\]]*\]\s*', '', new_body).strip()
+
+    for idx, stored in enumerate(notes):
+        if stored.note_id != note_id:
+            continue
+        notes[idx] = stored.model_copy(update={
+            "note_body": new_body,
+            "images": new_images,
+        })
+        updated_note = notes[idx]
+        break
+    save_notes(notes)
+
+    return {"message": "Image deleted successfully", "note": updated_note}

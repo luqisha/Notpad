@@ -1,4 +1,4 @@
-export default function NoteDisplay({ note, onEdit, onDelete, onSelect, className = '' }) {
+export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemoveImage, className = '' }) {
   if (!note) return null
 
   function renderBodyPreview(body = '', maxChars = 120) {
@@ -78,13 +78,26 @@ export default function NoteDisplay({ note, onEdit, onDelete, onSelect, classNam
       <div className="note-media-preview-row">
         {visibleItems.map((item) => (
           item.type === 'image' ? (
-            <img
-              key={item.key}
-              src={item.src}
-              alt="Image preview"
-              className="note-preview-media note-preview-image"
-              onClick={(e) => e.stopPropagation()}
-            />
+            <div key={item.key} className="note-preview-image-wrapper">
+              <img
+                src={item.src}
+                alt="Image preview"
+                className="note-preview-media note-preview-image"
+                onClick={(e) => e.stopPropagation()}
+              />
+              {typeof onRemoveImage === 'function' && (
+                <button
+                  className="note-preview-image-remove"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRemoveImage(note.note_id || note.id, item.key)
+                  }}
+                  title="Remove image"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           ) : (
             <div key={item.key} className="note-preview-media note-preview-audio" onClick={(e) => e.stopPropagation()}>
               <audio controls src={item.src} className="note-preview-audio-element" />

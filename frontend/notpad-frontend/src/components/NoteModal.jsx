@@ -1,181 +1,331 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { apiClient } from '../services/api'
 
-const MAX_UPLOAD_WIDTH = 1024
-
-function getImageSize(file) {
-	return new Promise((resolve, reject) => {
-		const imageUrl = URL.createObjectURL(file)
-		const img = new Image()
-		img.onload = () => {
-			URL.revokeObjectURL(imageUrl)
-			resolve({ width: img.naturalWidth, height: img.naturalHeight })
-		}
-		img.onerror = () => {
-			URL.revokeObjectURL(imageUrl)
-			reject(new Error('Unable to read image dimensions'))
-		}
-		img.src = imageUrl
-	})
+function escapeHtml(text = '') {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
 
-function resizeImageFile(file, targetWidth, targetHeight) {
-	return new Promise((resolve, reject) => {
-		const imageUrl = URL.createObjectURL(file)
-		const img = new Image()
-		img.onload = () => {
-			URL.revokeObjectURL(imageUrl)
-			const canvas = document.createElement('canvas')
-			canvas.width = targetWidth
-			canvas.height = targetHeight
-			const ctx = canvas.getContext('2d')
-			ctx.drawImage(img, 0, 0, targetWidth, targetHeight)
-			canvas.toBlob((blob) => {
-				if (!blob) {
-					reject(new Error('Image resize failed'))
-					return
-				}
-				resolve(new File([blob], file.name, { type: file.type || 'image/jpeg' }))
-			}, file.type || 'image/jpeg', 0.92)
-		}
-		img.onerror = () => {
-			URL.revokeObjectURL(imageUrl)
-			reject(new Error('Unable to load image for resize'))
-		}
-		img.src = imageUrl
-	})
+function parsePlaceholderMeta(placeholder) {
+  const match = placeholder.match(/\[(IMG|AUD):(\d+)(\|[^\]]+)?\]/)
+  if (!match) return null
+  const type = match[1]
+  const index = Number(match[2])
+  const meta = {}
+  if (match[3]) {
+    match[3].slice(1).split('|').forEach(pair => {
+      const [key, value] = pair.split('=')
+      if (key && value) meta[key] = value
+    })
+  }
+  return { type, index, meta }
 }
 
-async function createPendingImage(file) {
-	const { width, height } = await getImageSize(file)
-	const aspectRatio = width && height ? width / height : 1
-	const initialWidth = Math.min(width, MAX_UPLOAD_WIDTH)
-	const initialHeight = Math.max(1, Math.round(initialWidth / aspectRatio))
-	const uploadFile = initialWidth < width ? await resizeImageFile(file, initialWidth, initialHeight) : file
-	return {
-		id: `${file.name}-${file.size}-${file.lastModified}`,
-		file: uploadFile,
-		originalFile: file,
-		previewUrl: URL.createObjectURL(file),
-		naturalWidth: width,
-		naturalHeight: height,
-		width: initialWidth,
-		height: initialHeight,
-		aspectRatio,
-	}
+function serializePlaceholder(type, index, meta = {}) {
+  const parts = []
+  if (meta.width) parts.push(`w=${meta.width}`)
+  return parts.length > 0 ? `[${type}:${index}|${parts.join('|')}]` : `[${type}:${index}]`
+}
+
+function findImageUrlByIndex(images, index) {
+  if (!images) return null
+  const ref = Array.isArray(images) ? images.find(item => item.index === index) : null
+  if (!ref) return null
+  return ref?.picture_url || ref?.image_url || ref?.url || null
+}
+
+function bodyToHtml(body = '', images = []) {
+  const escaped = escapeHtml(body)
+  return escaped.replace(/\[(IMG|AUD):(\d+)(\|[^\]]+)?\]/g, (match, type, index, metaPart) => {
+    const meta = parsePlaceholderMeta(match)?.meta || {}
+    if (type === 'IMG') {
+      const src = findImageUrlByIndex(images, Number(index))
+      if (!src) return `<span class="note-placeholder">${escapeHtml(match)}</span>`
+      const widthStyle = meta.width ? `width:${meta.width}px;` : 'max-width:100%;'
+      const dataPlaceholder = serializePlaceholder(type, Number(index), meta)
+      return `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}" style="${widthStyle} vertical-align:middle; margin:4px;" />`
+    }
+    if (type === 'AUD') {
+      return `<span class="note-placeholder">${escapeHtml(match)}</span>`
+    }
+    return `<span class="note-placeholder">${escapeHtml(match)}</span>`
+  }).replace(/\n/g, '<br>')
+}
+
+function htmlToBody(html = '') {
+  const parser = new DOMParser()
+  const document = parser.parseFromString(`<div>${html}</div>`, 'text/html')
+  function nodeToText(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.textContent || ''
+    }
+    if (node.nodeName === 'BR') {
+      return '\n'
+    }
+    if (node.nodeName === 'IMG' || node.nodeName === 'AUDIO') {
+      return node.dataset.placeholder ? `[${node.dataset.placeholder}]` : ''
+    }
+    const children = Array.from(node.childNodes).map(nodeToText).join('')
+    if (['DIV', 'P', 'LI', 'BLOCKQUOTE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(node.nodeName)) {
+      return `${children}\n`
+    }
+    return children
+  }
+  const text = nodeToText(document.body)
+  return text.replace(/\n{2,}/g, '\n').trim()
 }
 
 export default function NoteModal({ initial, onCancel, onSave }) {
 	const [title, setTitle] = useState(initial?.title || '')
-	const [body, setBody] = useState(initial?.body || '')
 	const [error, setError] = useState('')
 	const [uploading, setUploading] = useState(false)
-	const [pendingImages, setPendingImages] = useState([])
-	const [uploadedImages, setUploadedImages] = useState([])
+	const [selectedMediaPlaceholder, setSelectedMediaPlaceholder] = useState(null)
+	const [selectedMediaWidth, setSelectedMediaWidth] = useState(null)
+	const [bodyLength, setBodyLength] = useState((initial?.body || '').length)
+	const [isResizing, setIsResizing] = useState(false)
+	const [handlePos, setHandlePos] = useState(null)
+	const editorRef = useRef(null)
+	const pendingFilesRef = useRef({})
+	const selectedImageEl = useRef(null)
+	const resizeStartPos = useRef({ x: 0, w: 0, aspect: 1 })
+	const savedRangeRef = useRef(null)
+
+	const isEdit = Boolean(initial?.id)
+	const noteImages = initial?.mediaImages || []
 
 	useEffect(() => {
-		return () => {
-			pendingImages.forEach(image => URL.revokeObjectURL(image.previewUrl))
-			uploadedImages.forEach(image => URL.revokeObjectURL(image.previewUrl))
+		if (editorRef.current) {
+			if (initial?.id && initial?.body) {
+				editorRef.current.innerHTML = bodyToHtml(initial.body, noteImages)
+			} else {
+				editorRef.current.innerHTML = ''
+			}
 		}
-	}, [pendingImages, uploadedImages])
+	}, [])
+
+	function handleEditorInput() {
+		if (!editorRef.current) return
+		setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
+	}
+
+	function handleEditorClick(event) {
+		const img = event.target.closest('.editor-image')
+		if (img) {
+			const width = parseInt(img.style.width) || 300
+			selectedImageEl.current = img
+			if (img.dataset.placeholder) {
+				setSelectedMediaPlaceholder(img.dataset.placeholder)
+			} else if (img.classList.contains('pending-image')) {
+				setSelectedMediaPlaceholder(`__pending__:${img.dataset.pendingId}`)
+			} else {
+				return
+			}
+			setSelectedMediaWidth(width)
+			editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
+			img.classList.add('selected-image')
+			return
+		}
+		selectedImageEl.current = null
+		setHandlePos(null)
+		editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
+		setSelectedMediaPlaceholder(null)
+		setSelectedMediaWidth(null)
+	}
+
+	function updateSelectedImageWidth(width) {
+		if (!selectedMediaPlaceholder || !editorRef.current) return
+		let image
+		if (selectedMediaPlaceholder.startsWith('__pending__:')) {
+			const pendingId = selectedMediaPlaceholder.replace('__pending__:', '')
+			image = editorRef.current.querySelector(`img[data-pending-id="${CSS.escape(pendingId)}"]`)
+		} else {
+			image = editorRef.current.querySelector(`img[data-placeholder="${CSS.escape(selectedMediaPlaceholder)}"]`)
+		}
+		if (!image) return
+		const aspect = (image.naturalWidth / image.naturalHeight) || 1
+		const height = Math.round(width / aspect)
+		image.style.width = `${width}px`
+		image.style.height = `${height}px`
+		if (image.dataset.placeholder) {
+			const [typeIndex, meta] = selectedMediaPlaceholder.split('|')
+			const newPlaceholder = meta ? `${typeIndex}|w=${width}` : `${typeIndex}|w=${width}`
+			image.dataset.placeholder = newPlaceholder
+			setSelectedMediaPlaceholder(newPlaceholder)
+		} else if (image.classList.contains('pending-image')) {
+			image.dataset.resizeWidth = width
+			setSelectedMediaPlaceholder(selectedMediaPlaceholder)
+		}
+		setSelectedMediaWidth(width)
+	}
+
+	function handleResizeMouseDown(e) {
+		e.preventDefault()
+		e.stopPropagation()
+		const img = selectedImageEl.current
+		if (!img) return
+		const currentWidth = parseInt(img.style.width) || Math.min(img.naturalWidth || 300, 800)
+		resizeStartPos.current = { x: e.clientX, w: currentWidth, aspect: (img.naturalWidth / img.naturalHeight) || 1 }
+		setIsResizing(true)
+		document.body.style.cursor = 'nwse-resize'
+		document.body.style.userSelect = 'none'
+	}
+
+	useEffect(() => {
+		if (!isResizing) return
+		function onMouseMove(e) {
+			const img = selectedImageEl.current
+			if (!img) return
+			const dx = e.clientX - resizeStartPos.current.x
+			const newWidth = Math.max(80, Math.min(1200, resizeStartPos.current.w + dx))
+			const newHeight = Math.round(newWidth / resizeStartPos.current.aspect)
+			img.style.width = `${newWidth}px`
+			img.style.height = `${newHeight}px`
+		}
+		function onMouseUp() {
+			setIsResizing(false)
+			document.body.style.cursor = ''
+			document.body.style.userSelect = ''
+			if (selectedImageEl.current && selectedMediaPlaceholder) {
+				const w = parseInt(selectedImageEl.current.style.width)
+				updateSelectedImageWidth(w || 300)
+			}
+		}
+		window.addEventListener('mousemove', onMouseMove)
+		window.addEventListener('mouseup', onMouseUp)
+		return () => {
+			window.removeEventListener('mousemove', onMouseMove)
+			window.removeEventListener('mouseup', onMouseUp)
+		}
+	}, [isResizing])
+
+	useEffect(() => {
+		if (!selectedMediaPlaceholder || !selectedImageEl.current) {
+			setHandlePos(null)
+			return
+		}
+		function updatePos() {
+			const img = selectedImageEl.current
+			if (!img || !editorRef.current) return
+			const imgRect = img.getBoundingClientRect()
+			const wrapper = editorRef.current.parentElement
+			if (!wrapper) return
+			const wrapperRect = wrapper.getBoundingClientRect()
+			setHandlePos({
+				top: imgRect.bottom - wrapperRect.top - 8,
+				left: imgRect.right - wrapperRect.left - 8,
+			})
+		}
+		updatePos()
+		window.addEventListener('scroll', updatePos, true)
+		window.addEventListener('resize', updatePos)
+		const obs = new ResizeObserver(updatePos)
+		if (editorRef.current) obs.observe(editorRef.current)
+		return () => {
+			window.removeEventListener('scroll', updatePos, true)
+			window.removeEventListener('resize', updatePos)
+			obs.disconnect()
+		}
+	}, [selectedMediaPlaceholder, selectedMediaWidth])
+
+	function clearSelectedMedia() {
+		selectedImageEl.current = null
+		setHandlePos(null)
+		setSelectedMediaPlaceholder(null)
+		setSelectedMediaWidth(null)
+	}
+
+	function saveCursorPosition() {
+		const sel = window.getSelection()
+		if (sel.rangeCount > 0 && editorRef.current) {
+			const range = sel.getRangeAt(0)
+			if (editorRef.current.contains(range.commonAncestorContainer)) {
+				savedRangeRef.current = range.cloneRange()
+			}
+		}
+	}
+
+	function insertHtmlAtCursor(editor, html) {
+		editor.focus()
+		const selection = window.getSelection()
+		let range
+		if (!selection.rangeCount) {
+			if (savedRangeRef.current) {
+				range = savedRangeRef.current.cloneRange()
+				selection.addRange(range)
+			} else {
+				range = document.createRange()
+				range.setStart(editor, 0)
+				range.collapse(true)
+				selection.addRange(range)
+			}
+		} else {
+			range = selection.getRangeAt(0)
+			if (!editor.contains(range.commonAncestorContainer)) {
+				if (savedRangeRef.current) {
+					range = savedRangeRef.current.cloneRange()
+					selection.removeAllRanges()
+					selection.addRange(range)
+				} else {
+					range.selectNodeContents(editor)
+					range.collapse(false)
+				}
+			}
+			range.deleteContents()
+		}
+		const fragment = range.createContextualFragment(html)
+		const lastNode = fragment.lastChild
+		range.insertNode(fragment)
+		if (lastNode) {
+			range.setStartAfter(lastNode)
+			range.collapse(true)
+		}
+		selection.removeAllRanges()
+		selection.addRange(range)
+	}
 
 	async function handleImageUpload(e) {
-		const files = Array.from(e.target.files || [])
-		if (files.length === 0) return
-
+		const fileList = e.target.files
+		const files = Array.from(fileList || [])
+		if (files.length === 0 || !editorRef.current) return
 		setError('')
 		setUploading(true)
 		try {
-			const newPending = []
 			for (const file of files) {
-				const image = await createPendingImage(file)
-				newPending.push(image)
+				if (isEdit) {
+					const res = await apiClient.uploadImage(initial.id, file)
+					const placeholder = res.placeholder
+					const pictureUrl = res.image?.picture_url
+					if (placeholder && pictureUrl) {
+						const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${pictureUrl}" style="max-width:100%; vertical-align:middle; margin:4px;" />`
+						insertHtmlAtCursor(editorRef.current, imgHtml)
+					}
+				} else {
+					const dataId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+					pendingFilesRef.current[dataId] = file
+					const blobUrl = URL.createObjectURL(file)
+					const imgHtml = `<img class="note-body-image editor-image pending-image" contenteditable="false" data-pending-id="${dataId}" src="${blobUrl}" style="max-width:100%; vertical-align:middle; margin:4px;" />`
+					insertHtmlAtCursor(editorRef.current, imgHtml)
+				}
 			}
-			setPendingImages(current => [...current, ...newPending])
-		} catch (err) {
-			setError('Failed to prepare image: ' + err.message)
-		} finally {
-			setUploading(false)
-		}
-	}
-
-	async function updatePendingImageSize(imageId, newWidth) {
-		const image = pendingImages.find(item => item.id === imageId)
-		if (!image) return
-
-		setError('')
-		setUploading(true)
-		try {
-			const newHeight = Math.max(1, Math.round(newWidth / image.aspectRatio))
-			const resizedFile = await resizeImageFile(image.originalFile, newWidth, newHeight)
-			setPendingImages(current => current.map(item => item.id === imageId ? {
-				...item,
-				file: resizedFile,
-				width: newWidth,
-				height: newHeight,
-			} : item))
-		} catch (err) {
-			setError('Failed to resize image: ' + err.message)
-		} finally {
-			setUploading(false)
-		}
-	}
-
-	async function uploadPendingImages() {
-		if (!initial?.id || pendingImages.length === 0) return true
-
-		setError('')
-		setUploading(true)
-		try {
-			for (const image of pendingImages) {
-				const res = await apiClient.uploadImage(initial.id, image.file)
-				setBody(res.note?.note_body || body)
-				setUploadedImages(current => [...current, {
-					...image,
-					uploaded: true,
-				}])
-			}
-			setPendingImages([])
-			return true
+			setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
 		} catch (err) {
 			setError('Failed to upload image: ' + err.message)
-			return false
 		} finally {
 			setUploading(false)
+			e.target.value = ''
 		}
-	}
-
-	function removePendingImage(imageId) {
-		setPendingImages(current => {
-			const remaining = current.filter(image => image.id !== imageId)
-			const removed = current.find(image => image.id === imageId)
-			if (removed) {
-				URL.revokeObjectURL(removed.previewUrl)
-			}
-			return remaining
-		})
-	}
-
-	function removeUploadedImage(imageId) {
-		setUploadedImages(current => {
-			const remaining = current.filter(image => image.id !== imageId)
-			const removed = current.find(image => image.id === imageId)
-			if (removed) {
-				URL.revokeObjectURL(removed.previewUrl)
-			}
-			return remaining
-		})
 	}
 
 	async function handleVoiceUpload(e) {
 		const file = e.target.files?.[0]
-		if (!file || !initial?.id) return
-
+		if (!file || !isEdit) return
 		setUploading(true)
 		try {
-			const res = await apiClient.uploadVoice(initial.id, file)
-			setBody(res.note?.note_body || body)
+			await apiClient.uploadVoice(initial.id, file)
 		} catch (err) {
 			setError('Failed to upload voice: ' + err.message)
 		} finally {
@@ -183,17 +333,8 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 		}
 	}
 
-	function handleBodyChange(e) {
-		setBody(e.target.value)
-		// Force LTR direction on input
-		if (e.target.getAttribute('dir') !== 'ltr') {
-			e.target.setAttribute('dir', 'ltr')
-		}
-	}
-
 	function handleTitleChange(e) {
 		setTitle(e.target.value)
-		// Force LTR direction on input
 		if (e.target.getAttribute('dir') !== 'ltr') {
 			e.target.setAttribute('dir', 'ltr')
 		}
@@ -204,44 +345,100 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 		setError('')
 
 		const trimmedTitle = title.trim()
-		const trimmedBody = body.trim()
+		const html = editorRef.current?.innerHTML || ''
+		const bodyText = htmlToBody(html)
 
-		if (!trimmedTitle || !trimmedBody) {
+		if (!trimmedTitle || !bodyText) {
 			setError('Title and body are required')
 			return
 		}
 
-		if (trimmedBody.length > 1000) {
+		if (bodyText.length > 1000) {
 			setError('Body must be less than 1000 characters')
 			return
 		}
 
-		if (pendingImages.length > 0 && trimmedBody.length + pendingImages.length * 8 > 1000) {
-			setError('Body plus images must be less than 1000 characters')
-			return
-		}
+		setUploading(true)
+		try {
+			if (isEdit) {
+				await apiClient.updateNote(initial.id, {
+					note_title: trimmedTitle,
+					note_body: bodyText,
+				})
+				onSave({
+					...initial,
+					title: trimmedTitle,
+					body: bodyText,
+				})
+			} else {
+				const pendingImgs = Array.from(editorRef.current?.querySelectorAll('.pending-image') || [])
 
-		if (initial?.id && pendingImages.length > 0) {
-			const uploaded = await uploadPendingImages()
-			if (!uploaded) {
-				return
+				let createBody = bodyText
+				const createRes = await apiClient.createNote(trimmedTitle, createBody)
+
+				const noteId = createRes.note?.note_id || createRes.note?.id
+				if (!noteId) throw new Error('Failed to create note')
+
+				if (pendingImgs.length > 0) {
+					for (const img of pendingImgs) {
+						const dataId = img.dataset.pendingId
+						if (!dataId) continue
+						const file = pendingFilesRef.current[dataId]
+						if (!file) continue
+
+						const uploadRes = await apiClient.uploadImage(noteId, file)
+						let ph = uploadRes.placeholder
+						const picUrl = uploadRes.image?.picture_url
+						const resizeWidth = img.dataset.resizeWidth
+						if (resizeWidth) {
+							const parsed = parsePlaceholderMeta(ph)
+							if (parsed) {
+								ph = serializePlaceholder(parsed.type, parsed.index, { width: Number(resizeWidth) })
+							}
+						}
+						if (ph && picUrl) {
+							URL.revokeObjectURL(img.src)
+							img.src = picUrl
+							img.dataset.placeholder = ph
+							img.style.width = resizeWidth ? `${resizeWidth}px` : ''
+							img.style.height = ''
+							img.classList.remove('pending-image')
+							img.removeAttribute('data-pending-id')
+							img.removeAttribute('data-resize-width')
+						}
+						delete pendingFilesRef.current[dataId]
+					}
+
+					const finalHtml = editorRef.current.innerHTML
+					const finalBody = htmlToBody(finalHtml)
+					await apiClient.updateNote(noteId, { note_body: finalBody })
+					onSave({
+						...initial,
+						title: trimmedTitle,
+						body: finalBody,
+						id: noteId,
+					})
+				} else {
+					onSave({
+						...initial,
+						title: trimmedTitle,
+						body: createBody,
+						id: noteId,
+					})
+				}
 			}
+		} catch (err) {
+			setError(err.message || 'Failed to save note')
+		} finally {
+			setUploading(false)
 		}
-
-		onSave({
-			...initial,
-			title: trimmedTitle,
-			body: trimmedBody,
-			id: initial?.id,
-			pendingImages: initial?.id ? undefined : pendingImages,
-		})
 	}
 
 	return (
 		<div className="modal">
 			<form className="modal-content" onSubmit={submit}>
 				<div className="modal-header">
-					<h3>{initial ? 'Edit Note' : 'New Note'}</h3>
+					<h3>{isEdit ? 'Edit Note' : 'New Note'}</h3>
 				</div>
 				{error && <div className="modal-error">{error}</div>}
 				<label className="field">
@@ -258,19 +455,35 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 				</label>
 				<label className="field">
 					Body
-					<textarea
-						dir="ltr"
-						spellCheck="false"
-						placeholder="Write your note here..."
-						value={body}
-						onChange={handleBodyChange}
-					/>
-					<span className="char-count">{body.length}/1000</span>
+					<div className="note-body-editor-wrapper" style={{ position: 'relative', margin: 0 }}>
+						<div
+							className="note-body-editor ce-editor modal-editor"
+							ref={editorRef}
+							contentEditable
+							suppressContentEditableWarning
+							dir="ltr"
+							onInput={handleEditorInput}
+							onClick={handleEditorClick}
+							onMouseUp={saveCursorPosition}
+							onKeyUp={saveCursorPosition}
+						/>
+						{handlePos && !isResizing && (
+							<div
+								className="image-resize-handle"
+								style={{ top: handlePos.top, left: handlePos.left }}
+								onMouseDown={handleResizeMouseDown}
+							/>
+						)}
+						{isResizing && (
+							<div className="image-resize-overlay" />
+						)}
+					</div>
+					<span className="char-count">{bodyLength}/1000</span>
 				</label>
 
 				<div className="media-section">
 					<div className="media-upload">
-						<label className="btn secondary">
+						<label className="btn secondary" onMouseDown={saveCursorPosition}>
 							📷 Add Image
 							<input
 								type="file"
@@ -281,99 +494,25 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 								multiple={true}
 							/>
 						</label>
-						<label className="btn secondary">
-							🎙️ Add Voice
-							<input
-								type="file"
-								accept="audio/*"
-								onChange={handleVoiceUpload}
-								disabled={uploading}
-								style={{ display: 'none' }}
-							/>
-						</label>
+						{isEdit && (
+							<label className="btn secondary">
+								🎙️ Add Voice
+								<input
+									type="file"
+									accept="audio/*"
+									onChange={handleVoiceUpload}
+									disabled={uploading}
+									style={{ display: 'none' }}
+								/>
+							</label>
+						)}
 					</div>
-
-					{uploadedImages.length > 0 && (
-						<div className="media-list">
-							<h4>Uploaded Images ({uploadedImages.length})</h4>
-							<div className="images-grid">
-								{uploadedImages.map(image => (
-									<div key={image.id} className="pending-image-card">
-										<img
-											src={image.previewUrl}
-											alt="Uploaded image"
-											className="media-thumbnail"
-										/>
-										<button
-											type="button"
-											className="btn ghost"
-											onClick={() => removeUploadedImage(image.id)}
-										>
-											Remove
-										</button>
-									</div>
-								))}
-							</div>
-						</div>
-					)}
-
-					{pendingImages.length > 0 && initial?.id && (
-						<div className="upload-pending-actions">
-							<button
-								type="button"
-								className="btn primary"
-								disabled={uploading}
-								onClick={uploadPendingImages}
-							>
-								Upload Selected Images
-							</button>
-							<span className="upload-hint">Resize images below before uploading.</span>
-						</div>
-					)}
-
-					{pendingImages.length > 0 && (
-						<div className="media-list">
-							<h4>Pending Images ({pendingImages.length})</h4>
-							<div className="images-grid">
-								{pendingImages.map(image => (
-									<div key={image.id} className="pending-image-card">
-										<img
-											src={image.previewUrl}
-											alt="Pending image"
-											className="media-thumbnail"
-										/>
-										<div className="resize-controls">
-											<label>
-												Resize width
-												<input
-													type="range"
-													min="100"
-													max={image.naturalWidth}
-													step="10"
-													value={image.width}
-													onChange={e => updatePendingImageSize(image.id, Number(e.target.value))}
-												/>
-											</label>
-											<div>{image.width} x {image.height}px</div>
-										</div>
-										<button
-											type="button"
-											className="btn ghost"
-											onClick={() => removePendingImage(image.id)}
-										>
-											Remove
-										</button>
-									</div>
-								))}
-							</div>
-						</div>
-					)}
 				</div>
 
 				<div className="modal-actions">
 					<button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
 					<button type="submit" className="btn primary" disabled={uploading}>
-						{uploading ? 'Uploading...' : 'Save'}
+						{uploading ? 'Saving...' : 'Save'}
 					</button>
 				</div>
 			</form>
