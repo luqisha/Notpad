@@ -31,6 +31,12 @@ function serializePlaceholder(type, index, meta = {}) {
   return parts.length > 0 ? `[${type}:${index}|${parts.join('|')}]` : `[${type}:${index}]`
 }
 
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+}
+
 function findImageUrlByIndex(images, index) {
   if (!images) return null
   const ref = Array.isArray(images) ? images.find(item => item.index === index) : null
@@ -40,7 +46,7 @@ function findImageUrlByIndex(images, index) {
 
 function bodyToHtml(body = '', images = []) {
   const escaped = escapeHtml(body)
-  return escaped.replace(/\[(IMG|AUD):(\d+)(\|[^\]]+)?\]/g, (match, type, index, metaPart) => {
+  return escaped.replace(/\[(IMG|AUD):(\d+)(\|[^\]]+)?\]/g, (match, type, index) => {
     const meta = parsePlaceholderMeta(match)?.meta || {}
     if (type === 'IMG') {
       const src = findImageUrlByIndex(images, Number(index))
@@ -80,19 +86,24 @@ function htmlToBody(html = '') {
 }
 
 export default function NoteModal({ initial, onCancel, onSave }) {
-	const [title, setTitle] = useState(initial?.title || '')
-	const [error, setError] = useState('')
-	const [uploading, setUploading] = useState(false)
-	const [selectedMediaPlaceholder, setSelectedMediaPlaceholder] = useState(null)
-	const [selectedMediaWidth, setSelectedMediaWidth] = useState(null)
-	const [bodyLength, setBodyLength] = useState((initial?.body || '').length)
-	const [isResizing, setIsResizing] = useState(false)
-	const [handlePos, setHandlePos] = useState(null)
-	const editorRef = useRef(null)
-	const pendingFilesRef = useRef({})
-	const selectedImageEl = useRef(null)
-	const resizeStartPos = useRef({ x: 0, w: 0, aspect: 1 })
-	const savedRangeRef = useRef(null)
+ 	const [title, setTitle] = useState(initial?.title || '')
+ 	const [error, setError] = useState('')
+ 	const [uploading, setUploading] = useState(false)
+ 	const [selectedMediaPlaceholder, setSelectedMediaPlaceholder] = useState(null)
+ 	const [selectedMediaWidth, setSelectedMediaWidth] = useState(null)
+ 	const [bodyLength, setBodyLength] = useState((initial?.body || '').length)
+ 	const [isResizing, setIsResizing] = useState(false)
+ 	const [handlePos, setHandlePos] = useState(null)
+ 	const [isRecording, setIsRecording] = useState(false)
+ 	const [recordingTime, setRecordingTime] = useState(0)
+ 	const editorRef = useRef(null)
+ 	const pendingFilesRef = useRef({})
+ 	const selectedImageEl = useRef(null)
+ 	const resizeStartPos = useRef({ x: 0, w: 0, aspect: 1 })
+ 	const savedRangeRef = useRef(null)
+ 	const mediaRecorderRef = useRef(null)
+ 	const audioChunksRef = useRef([])
+ 	const recordingTimerRef = useRef(null)
 
 	const isEdit = Boolean(initial?.id)
 	const noteImages = initial?.mediaImages || []
@@ -321,17 +332,86 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 	}
 
 	async function handleVoiceUpload(e) {
-		const file = e.target.files?.[0]
-		if (!file || !isEdit) return
-		setUploading(true)
-		try {
-			await apiClient.uploadVoice(initial.id, file)
-		} catch (err) {
-			setError('Failed to upload voice: ' + err.message)
-		} finally {
-			setUploading(false)
-		}
-	}
+ 		const file = e.target.files?.[0]
+ 		if (!file || !isEdit) return
+ 		setUploading(true)
+ 		try {
+ 			await apiClient.uploadVoice(initial.id, file)
+ 		} catch (err) {
+ 			setError('Failed to upload voice: ' + err.message)
+ 		} finally {
+ 			setUploading(false)
+ 		}
+ 	}
+
+ 	function startRecordingTimer() {
+ 		setRecordingTime(0)
+ 		recordingTimerRef.current = setInterval(() => {
+ 			setRecordingTime(prev => prev + 1)
+ 		}, 1000)
+ 	}
+
+ 	function stopRecordingTimer() {
+ 		if (recordingTimerRef.current) {
+ 			clearInterval(recordingTimerRef.current)
+ 			recordingTimerRef.current = null
+ 		}
+ 	}
+
+ 	async function startVoiceRecording() {
+ 		try {
+ 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+ 			audioChunksRef.current = []
+ 			mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+
+ 			mediaRecorderRef.current.ondataavailable = (event) => {
+ 				if (event.data.size > 0) {
+ 					audioChunksRef.current.push(event.data)
+ 				}
+ 			}
+
+ 			mediaRecorderRef.current.onstop = async () => {
+ 				stream.getTracks().forEach(track => track.stop())
+ 				const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+ 				await uploadVoiceRecording(audioBlob)
+ 			}
+
+ 			mediaRecorderRef.current.start()
+ 			setIsRecording(true)
+ 			startRecordingTimer()
+ 		} catch (err) {
+ 			setError('Failed to start recording: ' + err.message)
+ 		}
+ 	}
+
+ 	function stopVoiceRecording() {
+ 		if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+ 			mediaRecorderRef.current.stop()
+ 		}
+ 		setIsRecording(false)
+ 		stopRecordingTimer()
+ 	}
+
+ 	async function uploadVoiceRecording(audioBlob) {
+ 		setUploading(true)
+ 		try {
+ 			if (isEdit) {
+ 				const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
+ 				await apiClient.uploadVoice(initial.id, file)
+ 			} else {
+ 				const pendingId = `pending-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+ 				pendingFilesRef.current[pendingId] = audioBlob
+ 				const blobUrl = URL.createObjectURL(audioBlob)
+ 				const audioHtml = `<audio class="note-body-audio editor-audio pending-audio" controls data-pending-id="${pendingId}" src="${blobUrl}" style="width:100%; max-width:400px; margin:8px 0;"></audio>`
+ 				insertHtmlAtCursor(editorRef.current, audioHtml)
+ 				setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
+ 			}
+ 		} catch (err) {
+ 			setError('Failed to upload voice: ' + err.message)
+ 		} finally {
+ 			setUploading(false)
+ 		}
+ 	}
 
 	function handleTitleChange(e) {
 		setTitle(e.target.value)
@@ -371,62 +451,79 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 					body: bodyText,
 				})
 			} else {
-				const pendingImgs = Array.from(editorRef.current?.querySelectorAll('.pending-image') || [])
+ 				const pendingImgs = Array.from(editorRef.current?.querySelectorAll('.pending-image') || [])
+ 				const pendingAudios = Array.from(editorRef.current?.querySelectorAll('.pending-audio') || [])
 
-				let createBody = bodyText
-				const createRes = await apiClient.createNote(trimmedTitle, createBody)
+ 				let createBody = bodyText
+ 				const createRes = await apiClient.createNote(trimmedTitle, createBody)
 
-				const noteId = createRes.note?.note_id || createRes.note?.id
-				if (!noteId) throw new Error('Failed to create note')
+ 				const noteId = createRes.note?.note_id || createRes.note?.id
+ 				if (!noteId) throw new Error('Failed to create note')
 
-				if (pendingImgs.length > 0) {
-					for (const img of pendingImgs) {
-						const dataId = img.dataset.pendingId
-						if (!dataId) continue
-						const file = pendingFilesRef.current[dataId]
-						if (!file) continue
+ 				const hasPendingMedia = pendingImgs.length > 0 || pendingAudios.length > 0
 
-						const uploadRes = await apiClient.uploadImage(noteId, file)
-						let ph = uploadRes.placeholder
-						const picUrl = uploadRes.image?.picture_url
-						const resizeWidth = img.dataset.resizeWidth
-						if (resizeWidth) {
-							const parsed = parsePlaceholderMeta(ph)
-							if (parsed) {
-								ph = serializePlaceholder(parsed.type, parsed.index, { width: Number(resizeWidth) })
-							}
-						}
-						if (ph && picUrl) {
-							URL.revokeObjectURL(img.src)
-							img.src = picUrl
-							img.dataset.placeholder = ph
-							img.style.width = resizeWidth ? `${resizeWidth}px` : ''
-							img.style.height = ''
-							img.classList.remove('pending-image')
-							img.removeAttribute('data-pending-id')
-							img.removeAttribute('data-resize-width')
-						}
-						delete pendingFilesRef.current[dataId]
-					}
+ 				if (hasPendingMedia) {
+ 					for (const img of pendingImgs) {
+ 						const dataId = img.dataset.pendingId
+ 						if (!dataId) continue
+ 						const file = pendingFilesRef.current[dataId]
+ 						if (!file) continue
 
-					const finalHtml = editorRef.current.innerHTML
-					const finalBody = htmlToBody(finalHtml)
-					await apiClient.updateNote(noteId, { note_body: finalBody })
-					onSave({
-						...initial,
-						title: trimmedTitle,
-						body: finalBody,
-						id: noteId,
-					})
-				} else {
-					onSave({
-						...initial,
-						title: trimmedTitle,
-						body: createBody,
-						id: noteId,
-					})
-				}
-			}
+ 						const uploadRes = await apiClient.uploadImage(noteId, file)
+ 						let ph = uploadRes.placeholder
+ 						const picUrl = uploadRes.image?.picture_url
+ 						const resizeWidth = img.dataset.resizeWidth
+ 						if (resizeWidth) {
+ 							const parsed = parsePlaceholderMeta(ph)
+ 							if (parsed) {
+ 								ph = serializePlaceholder(parsed.type, parsed.index, { width: Number(resizeWidth) })
+ 							}
+ 						}
+ 						if (ph && picUrl) {
+ 							URL.revokeObjectURL(img.src)
+ 							img.src = picUrl
+ 							img.dataset.placeholder = ph
+ 							img.style.width = resizeWidth ? `${resizeWidth}px` : ''
+ 							img.style.height = ''
+ 							img.classList.remove('pending-image')
+ 							img.removeAttribute('data-pending-id')
+ 							img.removeAttribute('data-resize-width')
+ 						}
+ 						delete pendingFilesRef.current[dataId]
+ 					}
+
+ 					for (const audio of pendingAudios) {
+ 						const dataId = audio.dataset.pendingId
+ 						if (!dataId) continue
+ 						const audioBlob = pendingFilesRef.current[dataId]
+ 						if (!audioBlob) continue
+
+ 						const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
+ 						await apiClient.uploadVoice(noteId, file)
+ 						URL.revokeObjectURL(audio.src)
+ 						audio.classList.remove('pending-audio')
+ 						audio.removeAttribute('data-pending-id')
+ 						delete pendingFilesRef.current[dataId]
+ 					}
+
+ 					const finalHtml = editorRef.current.innerHTML
+ 					const finalBody = htmlToBody(finalHtml)
+ 					await apiClient.updateNote(noteId, { note_body: finalBody })
+ 					onSave({
+ 						...initial,
+ 						title: trimmedTitle,
+ 						body: finalBody,
+ 						id: noteId,
+ 					})
+ 				} else {
+ 					onSave({
+ 						...initial,
+ 						title: trimmedTitle,
+ 						body: createBody,
+ 						id: noteId,
+ 					})
+ 				}
+ 			}
 		} catch (err) {
 			setError(err.message || 'Failed to save note')
 		} finally {
@@ -482,32 +579,49 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 				</label>
 
 				<div className="media-section">
-					<div className="media-upload">
-						<label className="btn secondary" onMouseDown={saveCursorPosition}>
-							📷 Add Image
-							<input
-								type="file"
-								accept="image/*"
-								onChange={handleImageUpload}
-								disabled={uploading}
-								style={{ display: 'none' }}
-								multiple={true}
-							/>
-						</label>
-						{isEdit && (
-							<label className="btn secondary">
-								🎙️ Add Voice
-								<input
-									type="file"
-									accept="audio/*"
-									onChange={handleVoiceUpload}
-									disabled={uploading}
-									style={{ display: 'none' }}
-								/>
-							</label>
-						)}
-					</div>
-				</div>
+ 					<div className="media-upload">
+ 						<label className="btn secondary" onMouseDown={saveCursorPosition}>
+ 							📷 Add Image
+ 							<input
+ 								type="file"
+ 								accept="image/*"
+ 								onChange={handleImageUpload}
+ 								disabled={uploading}
+ 								style={{ display: 'none' }}
+ 								multiple={true}
+ 							/>
+ 						</label>
+ 						{isEdit && (
+ 							<label className="btn secondary">
+ 								🎙️ Add Voice
+ 								<input
+ 									type="file"
+ 									accept="audio/*"
+ 									onChange={handleVoiceUpload}
+ 									disabled={uploading}
+ 									style={{ display: 'none' }}
+ 								/>
+ 							</label>
+ 						)}
+ 						<button
+ 							type="button"
+ 							className={`btn secondary ${isRecording ? 'recording' : ''}`}
+ 							onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+ 							disabled={uploading}
+ 							onMouseDown={saveCursorPosition}
+ 						>
+ 							{isRecording ? (
+ 								<>
+ 									⏹️ Stop Recording
+ 									<span className="recording-time"> ({formatTime(recordingTime)})</span>
+ 									<span className="recording-indicator" />
+ 								</>
+ 							) : (
+ 								'🎙️ Record Voice'
+ 							)}
+ 						</button>
+ 					</div>
+ 				</div>
 
 				<div className="modal-actions">
 					<button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
