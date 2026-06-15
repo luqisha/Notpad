@@ -77,6 +77,11 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         whitelist_prefixes = (
             "/docs",
             "/openapi.json",
+            "/auth",
+            "/notes",
+            "/notes/",
+            "/groups",
+            "/groups/",
         )
         # Allow unauthenticated access to static uploads (image/voice files)
         whitelist_prefixes = whitelist_prefixes + ("/uploads",)

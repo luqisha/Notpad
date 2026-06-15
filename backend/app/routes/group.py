@@ -1,7 +1,7 @@
 from uuid import uuid4
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import ValidationError
 
 from app.utils.data_loader import (
@@ -12,12 +12,12 @@ from app.utils.data_loader import (
     load_group_notes_list,
     save_group_notes_list,
 )
-from app.utils.dependencies import get_logged_in_user_id
+from app.utils.dependencies import require_user_id
 from app.schemas.group import Group, GroupCreate, GroupUpdate, GroupNotesItem
 from app.schemas.note import Note
 from app.schemas.user import User
 
-router = APIRouter(prefix="/groups", tags=["group"])
+router = APIRouter(prefix="/groups", tags=["group"], redirect_slashes=False)
 
 
 def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
@@ -51,11 +51,8 @@ def _raise_validation_error(exc: Exception) -> None:
     raise HTTPException(status_code=422, detail={"validation_errors": [str(exc)]})
 
 
-@router.get("/")
-def get_groups(request: Request):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+@router.get("")
+def get_groups(request: Request, user_id: str = Depends(require_user_id)):
 
     groups = [g for g in load_groups() if g.user_id == user_id]
     mappings = {item.group_id: item.note_ids for item in load_group_notes_list()}
@@ -69,11 +66,8 @@ def get_groups(request: Request):
     return {"groups": result}
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
-def create_group(request: Request, group: GroupCreate):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+@router.post("", status_code=status.HTTP_201_CREATED)
+def create_group(request: Request, group: GroupCreate, user_id: str = Depends(require_user_id)):
 
     users = load_users()
     if not _find_user_by_id(users, user_id):
@@ -96,10 +90,7 @@ def create_group(request: Request, group: GroupCreate):
 
 
 @router.patch("/{group_id}")
-def update_group(request: Request, group_id: str, group: GroupUpdate):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+def update_group(request: Request, group_id: str, group: GroupUpdate, user_id: str = Depends(require_user_id)):
 
     groups = load_groups()
     existing = _find_group_by_id(groups, user_id, group_id)
@@ -125,10 +116,7 @@ def update_group(request: Request, group_id: str, group: GroupUpdate):
 
 
 @router.delete("/{group_id}")
-def delete_group(request: Request, group_id: str):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+def delete_group(request: Request, group_id: str, user_id: str = Depends(require_user_id)):
 
     groups = load_groups()
     existing = _find_group_by_id(groups, user_id, group_id)
@@ -146,10 +134,7 @@ def delete_group(request: Request, group_id: str):
 
 
 @router.post("/{group_id}/notes", status_code=status.HTTP_201_CREATED)
-def create_group_note(request: Request, group_id: str, note_id: str = None):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+def create_group_note(request: Request, group_id: str, note_id: str = None, user_id: str = Depends(require_user_id)):
 
     groups = load_groups()
     if not _find_group_by_id(groups, user_id, group_id):
@@ -175,10 +160,7 @@ def create_group_note(request: Request, group_id: str, note_id: str = None):
 
 
 @router.delete("/{group_id}/notes/{note_id}")
-def delete_group_note(request: Request, group_id: str, note_id: str):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+def delete_group_note(request: Request, group_id: str, note_id: str, user_id: str = Depends(require_user_id)):
 
     groups = load_groups()
     if not _find_group_by_id(groups, user_id, group_id):

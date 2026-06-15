@@ -6,16 +6,16 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import ValidationError
 
 from app.utils.data_loader import load_notes, load_users, save_notes, load_voices, load_pictures, save_voices, save_pictures
-from app.utils.dependencies import get_logged_in_user_id
+from app.utils.dependencies import require_user_id
 from app.schemas.media import Picture, Voice
 from app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
 from app.schemas.user import User
 
-router = APIRouter(prefix="/notes", tags=["notes"])
+router = APIRouter(prefix="/notes", tags=["notes"], redirect_slashes=False)
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 IMAGE_UPLOAD_DIR = UPLOADS_DIR / "images"
 VOICE_UPLOAD_DIR = UPLOADS_DIR / "voices"
@@ -108,10 +108,8 @@ def create_note_with_images(
     bg_color: str = Form("#FFFFFF"),
     is_pinned: str = Form("false"),
     images: Optional[list] = File(None),
+    user_id: str = Depends(require_user_id),
 ):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     users = load_users()
     if not _find_user_by_id(users, user_id):
@@ -165,11 +163,8 @@ def create_note_with_images(
     return {"message": "Note created successfully", "note": note}
 
 
-@router.post("/")
-def create_note(request: Request, note: NoteCreate):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+@router.post("")
+def create_note(request: Request, note: NoteCreate, user_id: str = Depends(require_user_id)):
 
     users = load_users()
     if not _find_user_by_id(users, user_id):
@@ -190,11 +185,8 @@ def create_note(request: Request, note: NoteCreate):
     return {"message": "Note created successfully", "note": note}
 
 
-@router.get("/")
-def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[str] = None):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+@router.get("")
+def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[str] = None, user_id: str = Depends(require_user_id)):
 
     # Validate pagination parameters
     if skip < 0:
@@ -248,10 +240,7 @@ def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[
 
 
 @router.patch("/{note_id}")
-def update_note(request: Request, note_id: str, note: NoteUpdate):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str = Depends(require_user_id)):
 
     updates = note.model_dump(exclude_none=True)
     if not updates:
@@ -277,10 +266,7 @@ def update_note(request: Request, note_id: str, note: NoteUpdate):
 
 
 @router.delete("/{note_id}")
-def delete_note(request: Request, note_id: str):
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
+def delete_note(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
 
     notes = load_notes()
     note = _find_note_by_id(notes, user_id, note_id)
@@ -293,11 +279,8 @@ def delete_note(request: Request, note_id: str):
 
 
 @router.post("/{note_id}/images")
-def upload_note_image(request: Request, note_id: str, file: UploadFile = File(...)):
+def upload_note_image(request: Request, note_id: str, file: UploadFile = File(...), user_id: str = Depends(require_user_id)):
     """Upload an image and return a placeholder token for the note body."""
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     note = _find_note_by_id(notes, user_id, note_id)
@@ -373,11 +356,8 @@ def upload_note_image(request: Request, note_id: str, file: UploadFile = File(..
 
 
 @router.post("/{note_id}/voices")
-def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(...)):
+def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(...), user_id: str = Depends(require_user_id)):
     """Upload a voice file and return a placeholder token for the note body."""
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     note = _find_note_by_id(notes, user_id, note_id)
@@ -424,11 +404,8 @@ def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(..
 
 
 @router.get("/{note_id}/voices")
-def get_note_voices(request: Request, note_id: str):
+def get_note_voices(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
     """Get all voices for a specific note."""
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     if not _find_note_by_id(notes, user_id, note_id):
@@ -440,11 +417,8 @@ def get_note_voices(request: Request, note_id: str):
 
 
 @router.get("/{note_id}/voices/{voice_id}")
-def get_note_voice(request: Request, note_id: str, voice_id: str):
+def get_note_voice(request: Request, note_id: str, voice_id: str, user_id: str = Depends(require_user_id)):
     """Get a specific voice from a note."""
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     if not _find_note_by_id(notes, user_id, note_id):
@@ -459,11 +433,8 @@ def get_note_voice(request: Request, note_id: str, voice_id: str):
 
 
 @router.get("/{note_id}/images")
-def get_note_images(request: Request, note_id: str):
+def get_note_images(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
     """Get all images for a specific note."""
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     if not _find_note_by_id(notes, user_id, note_id):
@@ -475,11 +446,8 @@ def get_note_images(request: Request, note_id: str):
 
 
 @router.get("/{note_id}/images/{image_id}")
-def get_note_image(request: Request, note_id: str, image_id: str):
+def get_note_image(request: Request, note_id: str, image_id: str, user_id: str = Depends(require_user_id)):
     """Get a specific image from a note."""
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     if not _find_note_by_id(notes, user_id, note_id):
@@ -494,11 +462,8 @@ def get_note_image(request: Request, note_id: str, image_id: str):
 
 
 @router.delete("/{note_id}/images/{image_id}")
-def delete_note_image(request: Request, note_id: str, image_id: str):
+def delete_note_image(request: Request, note_id: str, image_id: str, user_id: str = Depends(require_user_id)):
     """Delete an image from a note."""
-    user_id = get_logged_in_user_id(request)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not logged in")
 
     notes = load_notes()
     note = _find_note_by_id(notes, user_id, note_id)
