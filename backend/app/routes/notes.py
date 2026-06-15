@@ -9,7 +9,20 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import ValidationError
 
-from app.utils.data_loader import load_notes, load_users, save_notes, load_voices, load_pictures, save_voices, save_pictures
+from app.utils.data_loader import (
+    load_notes,
+    load_users,
+    save_notes,
+    load_voices,
+    load_pictures,
+    save_voices,
+    save_pictures,
+    _find_user_by_id,
+    _find_note_by_id,
+    _find_voice_by_id,
+    _find_picture_by_id,
+    _raise_validation_error,
+)
 from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.media import Picture, Voice
 from app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
@@ -59,45 +72,6 @@ def _get_next_voice_index(note: Note) -> int:
     if not note.voices:
         return 1
     return max(voice.index for voice in note.voices) + 1
-
-
-def _find_user_by_id(users: list[User], user_id: str) -> Optional[User]:
-    for user in users:
-        if user.user_id == user_id:
-            return user
-    return None
-
-
-def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
-    for note in notes:
-        if note.note_id == note_id and note.user_id == user_id:
-            return note
-    return None
-
-
-def _find_voice_by_id(voices: list[Voice], user_id: str, voice_id: str) -> Optional[Voice]:
-    for voice in voices:
-        if voice.voice_id == voice_id and voice.user_id == user_id:
-            return voice
-    return None
-
-
-def _find_picture_by_id(pictures: list[Picture], user_id: str, picture_id: str) -> Optional[Picture]:
-    for picture in pictures:
-        if picture.picture_id == picture_id and picture.user_id == user_id:
-            return picture
-    return None
-
-
-def _raise_validation_error(exc: Exception) -> None:
-    if isinstance(exc, ValidationError):
-        errors = []
-        for error in exc.errors():
-            field = ".".join(str(x) for x in error["loc"])
-            msg = error["msg"]
-            errors.append(f"{field}: {msg}")
-        raise HTTPException(status_code=422, detail={"validation_errors": errors})
-    raise HTTPException(status_code=422, detail={"validation_errors": [str(exc)]})
 
 
 @router.post("/with-images")

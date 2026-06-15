@@ -11,6 +11,10 @@ from app.utils.data_loader import (
     save_groups,
     load_group_notes_list,
     save_group_notes_list,
+    _find_user_by_id,
+    _find_note_by_id,
+    _find_group_by_id,
+    _raise_validation_error,
 )
 from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.group import Group, GroupCreate, GroupUpdate, GroupNotesItem
@@ -18,37 +22,6 @@ from app.schemas.note import Note
 from app.schemas.user import User
 
 router = APIRouter(prefix="/groups", tags=["group"], redirect_slashes=False, dependencies=[Depends(verify_api_key)])
-
-
-def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
-    for note in notes:
-        if note.note_id == note_id and note.user_id == user_id:
-            return note
-    return None
-
-
-def _find_group_by_id(groups: list[Group], user_id: str, group_id: str) -> Optional[Group]:
-    for group in groups:
-        if group.group_id == group_id and group.user_id == user_id:
-            return group
-    return None
-
-
-def _find_user_by_id(users: list[User], user_id: str) -> Optional[User]:
-    for user in users:
-        if user.user_id == user_id:
-            return user
-    return None
-
-
-def _raise_validation_error(exc: Exception) -> None:
-    if isinstance(exc, ValidationError):
-        errors = [
-            f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
-            for err in exc.errors()
-        ]
-        raise HTTPException(status_code=422, detail={"validation_errors": errors})
-    raise HTTPException(status_code=422, detail={"validation_errors": [str(exc)]})
 
 
 @router.get("")
