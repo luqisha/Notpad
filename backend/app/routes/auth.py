@@ -1,14 +1,15 @@
 import uuid
 
 import bcrypt
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import ValidationError
 from typing import Optional
 
 from app.utils.data_loader import load_users, save_users
 from app.schemas.user import User, UserCreate
+from app.utils.dependencies import verify_api_key
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(verify_api_key)])
 
 
 def _find_user_by_mail(users: list[User], email: str) -> Optional[User]:

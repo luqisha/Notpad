@@ -12,12 +12,12 @@ from app.utils.data_loader import (
     load_group_notes_list,
     save_group_notes_list,
 )
-from app.utils.dependencies import require_user_id
+from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.group import Group, GroupCreate, GroupUpdate, GroupNotesItem
 from app.schemas.note import Note
 from app.schemas.user import User
 
-router = APIRouter(prefix="/groups", tags=["group"], redirect_slashes=False)
+router = APIRouter(prefix="/groups", tags=["group"], redirect_slashes=False, dependencies=[Depends(verify_api_key)])
 
 
 def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
