@@ -311,14 +311,14 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 					const placeholder = res.placeholder
 					const pictureUrl = res.image?.picture_url
 					if (placeholder && pictureUrl) {
-						const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${pictureUrl}" style="max-width:100%; vertical-align:middle; margin:4px;" />`
+						const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${pictureUrl}" style="width:300px; max-width:100%; vertical-align:middle; margin:4px;" />`
 						insertHtmlAtCursor(editorRef.current, imgHtml)
 					}
 				} else {
 					const dataId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 					pendingFilesRef.current[dataId] = file
 					const blobUrl = URL.createObjectURL(file)
-					const imgHtml = `<img class="note-body-image editor-image pending-image" contenteditable="false" data-pending-id="${dataId}" src="${blobUrl}" style="max-width:100%; vertical-align:middle; margin:4px;" />`
+					const imgHtml = `<img class="note-body-image editor-image pending-image" contenteditable="false" data-pending-id="${dataId}" src="${blobUrl}" style="width:300px; max-width:100%; vertical-align:middle; margin:4px;" />`
 					insertHtmlAtCursor(editorRef.current, imgHtml)
 				}
 			}

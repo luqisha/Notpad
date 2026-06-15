@@ -72,7 +72,7 @@ function bodyToHtml(body = '', note = {}) {
     if (type === 'IMG') {
       const src = findImageUrlByIndex(note, Number(index))
       if (!src) return `<span class="note-placeholder">${escapeHtml(match)}</span>`
-      const widthStyle = meta.width ? `width:${meta.width}px;` : 'max-width:100%;'
+      const widthStyle = meta.width ? `width:${meta.width}px;` : 'width:300px; max-width:100%;'
       const dataPlaceholder = serializePlaceholder(type, Number(index), meta)
       return `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}" style="${widthStyle} vertical-align:middle; margin:4px;" />`
     }
@@ -80,7 +80,7 @@ function bodyToHtml(body = '', note = {}) {
       const src = findVoiceUrlByIndex(note, Number(index))
       if (!src) return `<span class="note-placeholder">${escapeHtml(match)}</span>`
       const dataPlaceholder = serializePlaceholder(type, Number(index), meta)
-      return `<audio controls class="note-body-audio" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}"></audio>`
+      return `<audio controls class="note-body-audio" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}" style="width:100%; max-width:400px; margin:8px 0;"></audio>`
     }
     return `<span class="note-placeholder">${escapeHtml(match)}</span>`
   }).replace(/\n/g, '<br>')
@@ -402,7 +402,7 @@ export default function App() {
 				const placeholder = res.placeholder
 				const image = res.image
 				if (placeholder) {
-					const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${image.picture_url}" style="max-width:100%; vertical-align:middle; margin:4px;" />`
+					const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${image.picture_url}" style="width:300px; max-width:100%; vertical-align:middle; margin:4px;" />`
 					insertHtmlAtCursor(editorRef.current, imgHtml)
 				}
 				const html = editorRef.current.innerHTML
@@ -644,6 +644,7 @@ export default function App() {
 									contentEditable
 									suppressContentEditableWarning
 									dir="ltr"
+									dangerouslySetInnerHTML={{ __html: viewDraftHtml }}
 									onInput={handleEditorInput}
 									onClick={handleEditorClick}
 									onKeyDown={handleEditorKeyDown}

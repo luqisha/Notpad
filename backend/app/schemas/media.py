@@ -21,7 +21,7 @@ class Voice(BaseModel):
     @field_validator("voice_url")
     @classmethod
     def validate_voice_extension(cls, value: str) -> str:
-        allowed = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac", ".amr"}
+        allowed = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac", ".amr", ".webm"}
         path = urlparse(value).path
         _, ext = os.path.splitext(path)
         if ext.lower() not in allowed:

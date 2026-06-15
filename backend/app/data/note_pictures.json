@@ -1,23 +1,9 @@
 [
   {
-    "picture_id": "b7795b19-73bb-4eda-8a2c-121ca08bc81c",
-    "note_id": "8f3b4a4c-5fce-45fc-a136-64783c9f0b42",
+    "picture_id": "51f29d49-7d24-404e-acea-9020bbee5818",
+    "note_id": "ed10cb6f-80da-41e7-a141-1f8127544b09",
     "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
-    "picture_url": "http://localhost:8000/uploads/images/c62d470a-ff0d-4e7e-ac9d-a46206f9cdd5.webp",
-    "file_hash": null
-  },
-  {
-    "picture_id": "aa7ddda5-e953-4b9e-8819-500216e5a54a",
-    "note_id": "bae1509a-e2f1-4e21-bbbc-6d0a50991aae",
-    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
-    "picture_url": "http://localhost:8000/uploads/images/25a154f5-4e40-437e-9795-2297f9c76d4f.webp",
-    "file_hash": null
-  },
-  {
-    "picture_id": "ca317013-f434-445e-9f22-7a454670530a",
-    "note_id": "8d6324bd-b4ca-4fa3-9edc-893ca0482155",
-    "user_id": "aa8634d3-1fc2-4ba1-a12d-f2d6bf76e7c9",
-    "picture_url": "http://localhost:8000/uploads/images/255d3c88-949b-4269-a819-269873492edf.webp",
+    "picture_url": "http://localhost:8000/uploads/images/cd68a8bc-8a42-4b2c-9041-33d2e3bbcd13.webp",
     "file_hash": "6f4029156e2eeed1f17d9fa0004899401f6a2f9f133b87e6d0029bba3b0ae586"
   }
 ]

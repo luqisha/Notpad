@@ -52,8 +52,8 @@ export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemove
       })),
       voices: voices.map((voice) => ({
         type: 'audio',
-        key: voice.voice_id || voice.voice_url || voice.id,
-        src: voice.voice_url || voice.url,
+        key: voice.voice_id || voice.voice_url || voice.id || voice.picture_id,
+        src: voice.voice_url || voice.url || voice.audio_url || voice.file_url,
       })),
     }
   }
@@ -100,7 +100,7 @@ export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemove
             </div>
           ) : (
             <div key={item.key} className="note-preview-media note-preview-audio" onClick={(e) => e.stopPropagation()}>
-              <audio controls src={item.src} className="note-preview-audio-element" />
+              <audio controls src={item.src} className="note-preview-audio-element" style={{ width: '180px', minWidth: '180px' }} />
             </div>
           )
         ))}
