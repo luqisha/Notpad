@@ -7,7 +7,6 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from pydantic import ValidationError
 
 from app.utils.data_loader import (
     load_notes,
@@ -21,7 +20,6 @@ from app.utils.data_loader import (
     _find_note_by_id,
     _find_voice_by_id,
     _find_picture_by_id,
-    _raise_validation_error,
 )
 from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.media import Picture, Voice
@@ -97,19 +95,16 @@ def create_note_with_images(
     # Convert string to boolean
     is_pinned_bool = is_pinned.lower() in ("true", "1", "yes")
 
-    try:
-        note = Note(
-            note_id=str(uuid.uuid4()),
-            user_id=user_id,
-            note_title=note_title,
-            note_body=note_body,
-            bg_color=bg_color,
-            is_pinned=is_pinned_bool,
-            images=[],
-            voices=[],
-        )
-    except (ValidationError, ValueError) as exc:
-        _raise_validation_error(exc)
+    note = Note(
+        note_id=str(uuid.uuid4()),
+        user_id=user_id,
+        note_title=note_title,
+        note_body=note_body,
+        bg_color=bg_color,
+        is_pinned=is_pinned_bool,
+        images=[],
+        voices=[],
+    )
 
     if images:
         for file in images:
@@ -145,14 +140,11 @@ def create_note(request: Request, note: NoteCreate, user_id: str = Depends(requi
         raise HTTPException(status_code=404, detail="User not found")
 
     notes = load_notes()
-    try:
-        note = Note(
-            note_id=str(uuid.uuid4()),
-            user_id=user_id,
-            **note.model_dump(),
-        )
-    except (ValidationError, ValueError) as exc:
-        _raise_validation_error(exc)
+    note = Note(
+        note_id=str(uuid.uuid4()),
+        user_id=user_id,
+        **note.model_dump(),
+    )
 
     notes.append(note)
     save_notes(notes)
@@ -225,14 +217,11 @@ def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str =
     if not existing:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    try:
-        for index, stored in enumerate(notes):
-            if stored.note_id != note_id:
-                continue
-            notes[index] = stored.model_copy(update=updates)
-            break
-    except ValidationError as exc:
-        _raise_validation_error(exc)
+    for index, stored in enumerate(notes):
+        if stored.note_id != note_id:
+            continue
+        notes[index] = stored.model_copy(update=updates)
+        break
 
     save_notes(notes)
     updated = _find_note_by_id(notes, user_id, note_id)

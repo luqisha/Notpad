@@ -2,7 +2,6 @@ from uuid import uuid4
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import ValidationError
 
 from app.utils.data_loader import (
     load_notes,
@@ -14,7 +13,6 @@ from app.utils.data_loader import (
     _find_user_by_id,
     _find_note_by_id,
     _find_group_by_id,
-    _raise_validation_error,
 )
 from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.group import Group, GroupCreate, GroupUpdate, GroupNotesItem
@@ -47,14 +45,11 @@ def create_group(request: Request, group: GroupCreate, user_id: str = Depends(re
         raise HTTPException(status_code=404, detail="User not found")
 
     group_id = str(uuid4())
-    try:
-        group_obj = Group.model_validate({
-            "group_id": group_id,
-            "user_id": user_id,
-            **group.model_dump(),
-        })
-    except (ValidationError, ValueError) as exc:
-        _raise_validation_error(exc)
+    group_obj = Group.model_validate({
+        "group_id": group_id,
+        "user_id": user_id,
+        **group.model_dump(),
+    })
 
     groups = load_groups()
     groups.append(group_obj)
@@ -74,10 +69,7 @@ def update_group(request: Request, group_id: str, group: GroupUpdate, user_id: s
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    try:
-        updated = existing.model_copy(update=updates)
-    except ValidationError as exc:
-        _raise_validation_error(exc)
+    updated = existing.model_copy(update=updates)
 
     for i, stored in enumerate(groups):
         if stored.group_id == group_id and stored.user_id == user_id:
