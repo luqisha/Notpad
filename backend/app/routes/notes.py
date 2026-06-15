@@ -1,3 +1,4 @@
+import filetype
 import hashlib
 import re
 import shutil
@@ -35,12 +36,70 @@ UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 IMAGE_UPLOAD_DIR = UPLOADS_DIR / "images"
 VOICE_UPLOAD_DIR = UPLOADS_DIR / "voices"
 
+MAX_IMAGE_SIZE = 10 * 1024 * 1024
+MAX_VOICE_SIZE = 50 * 1024 * 1024
+
+ALLOWED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+}
+
+ALLOWED_VOICE_MIME_TYPES = {
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/flac",
+    "audio/aac",
+    "audio/amr",
+    "audio/webm",
+}
+
+
+def _validate_upload_file(file: UploadFile, allowed_mimes: set[str], max_size: int) -> None:
+    content_type = file.content_type
+    if not content_type or content_type not in allowed_mimes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed types: {', '.join(sorted(allowed_mimes))}",
+        )
+
+    file.file.seek(0)
+    header = file.file.read(8192)
+    file.file.seek(0)
+
+    kind = filetype.guess(header)
+    if kind is None or kind.mime not in allowed_mimes:
+        detected = kind.mime if kind else "unknown"
+        raise HTTPException(
+            status_code=400,
+            detail=f"File content does not match allowed types. Detected: {detected}",
+        )
+
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+
+    if file_size > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size exceeds maximum allowed size of {max_size // (1024 * 1024)}MB",
+        )
+
 
 def _make_upload_url(request: Request, subpath: str) -> str:
     return str(request.base_url).rstrip("/") + f"/uploads/{subpath}"
 
 
-def _save_upload_file(file: UploadFile, target_dir: Path) -> tuple[str, str]:
+def _save_upload_file(
+    file: UploadFile, target_dir: Path, allowed_mimes: set[str], max_size: int
+) -> tuple[str, str]:
+    _validate_upload_file(file, allowed_mimes, max_size)
+
     target_dir.mkdir(parents=True, exist_ok=True)
     extension = Path(file.filename).suffix
     if not extension:
@@ -113,7 +172,7 @@ def create_note_with_images(
 
     if images:
         for file in images:
-            filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR)
+            filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_SIZE)
             image_url = _make_upload_url(request, f"images/{filename}")
             picture = Picture(
                 picture_id=str(uuid.uuid4()),
@@ -260,7 +319,7 @@ def upload_note_image(request: Request, note_id: str, file: UploadFile = File(..
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR)
+    filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_SIZE)
     image_url = _make_upload_url(request, f"images/{filename}")
 
     pictures = load_pictures()
@@ -338,7 +397,7 @@ def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(..
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    filename, _ = _save_upload_file(file, VOICE_UPLOAD_DIR)
+    filename, _ = _save_upload_file(file, VOICE_UPLOAD_DIR, ALLOWED_VOICE_MIME_TYPES, MAX_VOICE_SIZE)
     voice_url = _make_upload_url(request, f"voices/{filename}")
     voice = Voice(
         voice_id=str(uuid.uuid4()),
