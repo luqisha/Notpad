@@ -8,5 +8,10 @@
     "user_id": "05ae0693-9be0-481f-9213-192d7bef525d",
     "user_mail": "test@example.com",
     "user_pass": "$2b$12$SSCZyaRhQNBCsffDwFQN8.vQXOrH2GFR2IX09ArsEkUEADGSa59dW"
+  },
+  {
+    "user_id": "2957d708-61c4-4380-ae65-d7ceb8ba8e46",
+    "user_mail": "test@test.com",
+    "user_pass": "$2b$12$8dmcZ8FZdTgmgUWwXMJvf.5Ft9rIh9RsZ0btoz7bnJo1OpLqpqgEW"
   }
 ]

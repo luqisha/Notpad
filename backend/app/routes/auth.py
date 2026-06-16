@@ -10,7 +10,7 @@ from app.utils.data_loader import load_users, save_users
 from app.schemas.user import User, UserCreate
 from app.utils.dependencies import verify_api_key
 
-router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 limiter = Limiter(key_func=get_remote_address)
 
