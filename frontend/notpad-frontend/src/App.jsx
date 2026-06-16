@@ -225,6 +225,12 @@ export default function App() {
 		}
 	}, [selected, notes])
 
+	useEffect(() => {
+		if (editorRef.current && viewDraftHtml) {
+			editorRef.current.innerHTML = viewDraftHtml
+		}
+	}, [editorKey, viewDraftHtml])
+
 	const filteredNotes = notes
 	const modalVisible = isOpen || showGroupCreator || Boolean(editingGroup) || Boolean(deleteCandidate)
 	const showPagination = pagination && !search && pagination.total_pages > 1 && !modalVisible
@@ -644,7 +650,6 @@ export default function App() {
 									contentEditable
 									suppressContentEditableWarning
 									dir="ltr"
-									dangerouslySetInnerHTML={{ __html: viewDraftHtml }}
 									onInput={handleEditorInput}
 									onClick={handleEditorClick}
 									onKeyDown={handleEditorKeyDown}
@@ -681,15 +686,16 @@ notes.length === 0 ? (
 							) : (
 									<>
 										<div ref={notesRef} className={`notes ${collapsed ? 'collapsed' : 'expanded'}`}>
-											{filteredNotes.map(note => (
-												<NoteDisplay
-													key={note.note_id}
-													note={note}
-													onDelete={() => handleDelete(note)}
-													onSelect={() => setSelected({ type: 'note', id: note.note_id })}
-													onRemoveImage={handleRemoveImage}
-												/>
-											))}
+{filteredNotes.map(note => (
+                                            <NoteDisplay
+                                                key={note.note_id}
+                                                note={note}
+                                                onEdit={() => { setEditing(note); setIsOpen(true); }}
+                                                onDelete={() => handleDelete(note)}
+                                                onSelect={() => setSelected({ type: 'note', id: note.note_id })}
+                                                onRemoveImage={handleRemoveImage}
+                                            />
+                                        ))}
 										</div>
 										{showPagination && (
 											<Pagination
@@ -730,15 +736,16 @@ notes.length === 0 ? (
 											<div style={{ marginTop: '20px' }}>
 												<h4>Notes ({groupNotes.length})</h4>
 												<div ref={notesRef} className={`notes ${collapsed ? 'collapsed' : 'expanded'}`}>
-													{groupNotes.map(note => (
-														<NoteDisplay
-															key={note.note_id}
-															note={note}
-															onDelete={() => handleDelete(note)}
-															onSelect={() => setSelected({ type: 'note', id: note.note_id })}
-															onRemoveImage={handleRemoveImage}
-														/>
-													))}
+{groupNotes.map(note => (
+                                                        <NoteDisplay
+                                                            key={note.note_id}
+                                                            note={note}
+                                                            onEdit={() => { setEditing(note); setIsOpen(true); }}
+                                                            onDelete={() => handleDelete(note)}
+                                                            onSelect={() => setSelected({ type: 'note', id: note.note_id })}
+                                                            onRemoveImage={handleRemoveImage}
+                                                        />
+                                                    ))}
 												</div>
 											</div>
 										)}

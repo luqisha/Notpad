@@ -4,40 +4,15 @@ export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemove
   function renderBodyPreview(body = '', maxChars = 120) {
     if (!body) return 'No content yet.'
 
-    const placeholderMap = {
-      IMG: '[Image]',
-      AUD: '[Audio]',
+    const cleanBody = body
+      .replace(/\[IMG:[^\]]*\]/g, '')
+      .replace(/\[AUD:[^\]]*\]/g, '[Audio]')
+      .replace(/[\[\]]+/g, '')
+
+    if (cleanBody.length > maxChars) {
+      return `${cleanBody.slice(0, maxChars).trimEnd()}...`
     }
-    const regex = /\[(IMG|AUD):(\d+)[^\]]*\]/g
-    let result = ''
-    let lastIndex = 0
-    let match
-
-    while ((match = regex.exec(body)) !== null) {
-      const [placeholder, type] = match
-      const start = match.index
-
-      if (start > lastIndex) {
-        result += body.slice(lastIndex, start)
-      }
-
-      result += placeholderMap[type] || placeholder
-      lastIndex = start + placeholder.length
-
-      if (result.length >= maxChars) {
-        break
-      }
-    }
-
-    if (lastIndex < body.length && result.length < maxChars) {
-      result += body.slice(lastIndex)
-    }
-
-    if (result.length > maxChars) {
-      result = `${result.slice(0, maxChars).trimEnd()}...`
-    }
-
-    return result || 'No content yet.'
+    return cleanBody || 'No content yet.'
   }
 
   function getMediaPreviewItems() {
@@ -62,13 +37,19 @@ export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemove
     const { images, voices } = getMediaPreviewItems()
     if (images.length === 0 && voices.length === 0) return null
 
+    const MAX_PREVIEW_IMAGES = 2
+    const MAX_PREVIEW_AUDIO = 2
+
     let visibleItems = []
     if (images.length > 0 && voices.length > 0) {
-      visibleItems = [images[0], voices[0]]
+      visibleItems = [
+        ...images.slice(0, MAX_PREVIEW_IMAGES - 1),
+        ...voices.slice(0, MAX_PREVIEW_AUDIO)
+      ]
     } else if (images.length > 0) {
-      visibleItems = images.slice(0, 2)
+      visibleItems = images.slice(0, MAX_PREVIEW_IMAGES)
     } else if (voices.length > 0) {
-      visibleItems = voices.slice(0, 2)
+      visibleItems = voices.slice(0, MAX_PREVIEW_AUDIO)
     }
 
     const totalCount = images.length + voices.length
@@ -85,18 +66,6 @@ export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemove
                 className="note-preview-media note-preview-image"
                 onClick={(e) => e.stopPropagation()}
               />
-              {typeof onRemoveImage === 'function' && (
-                <button
-                  className="note-preview-image-remove"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onRemoveImage(note.note_id || note.id, item.key)
-                  }}
-                  title="Remove image"
-                >
-                  ✕
-                </button>
-              )}
             </div>
           ) : (
             <div key={item.key} className="note-preview-media note-preview-audio" onClick={(e) => e.stopPropagation()}>

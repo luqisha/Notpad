@@ -271,6 +271,22 @@ def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[
     }
 
 
+def _extract_image_indices_from_body(body: str) -> set[int]:
+    """Extract all image indices from placeholders in the note body."""
+    indices = set()
+    for match in re.finditer(r'\[IMG:(\d+)(\|[^\]]+)?\]', body):
+        indices.add(int(match.group(1)))
+    return indices
+
+
+def _extract_voice_indices_from_body(body: str) -> set[int]:
+    """Extract all voice indices from placeholders in the note body."""
+    indices = set()
+    for match in re.finditer(r'\[AUD:(\d+)(\|[^\]]+)?\]', body):
+        indices.add(int(match.group(1)))
+    return indices
+
+
 @router.patch("/{note_id}")
 @limiter.limit("60/minute")
 def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str = Depends(require_user_id)):
@@ -284,10 +300,48 @@ def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str =
     if not existing:
         raise HTTPException(status_code=404, detail="Note not found")
 
+    new_body = updates.get("note_body", existing.note_body)
+    referenced_image_indices = _extract_image_indices_from_body(new_body)
+    referenced_voice_indices = _extract_voice_indices_from_body(new_body)
+
+    current_image_refs = {ref.index: ref for ref in existing.images}
+    orphaned_image_refs = [ref for idx, ref in current_image_refs.items() if idx not in referenced_image_indices]
+
+    if orphaned_image_refs:
+        pictures = load_pictures()
+        for ref in orphaned_image_refs:
+            picture = _find_picture_by_id(pictures, user_id, ref.id)
+            if picture:
+                picture_path = urlparse(picture.picture_url).path
+                image_file = IMAGE_UPLOAD_DIR / Path(picture_path).name
+                image_file.unlink(missing_ok=True)
+                pictures = [p for p in pictures if p.picture_id != ref.id]
+        save_pictures(pictures)
+
+    updated_images = [ref for ref in existing.images if ref.index in referenced_image_indices]
+
+    current_voice_refs = {ref.index: ref for ref in existing.voices}
+    orphaned_voice_refs = [ref for idx, ref in current_voice_refs.items() if idx not in referenced_voice_indices]
+
+    if orphaned_voice_refs:
+        voices = load_voices()
+        for ref in orphaned_voice_refs:
+            voice = _find_voice_by_id(voices, user_id, ref.id)
+            if voice:
+                voice_path = urlparse(voice.voice_url).path
+                voice_file = VOICE_UPLOAD_DIR / Path(voice_path).name
+                voice_file.unlink(missing_ok=True)
+                voices = [v for v in voices if v.voice_id != ref.id]
+        save_voices(voices)
+
+    updated_voices = [ref for ref in existing.voices if ref.index in referenced_voice_indices]
+
+    final_updates = {**updates, "images": updated_images, "voices": updated_voices}
+
     for index, stored in enumerate(notes):
         if stored.note_id != note_id:
             continue
-        notes[index] = stored.model_copy(update=updates)
+        notes[index] = stored.model_copy(update=final_updates)
         break
 
     save_notes(notes)

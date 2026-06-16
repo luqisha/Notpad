@@ -73,7 +73,7 @@ function htmlToBody(html = '') {
       return '\n'
     }
     if (node.nodeName === 'IMG' || node.nodeName === 'AUDIO') {
-      return node.dataset.placeholder ? `[${node.dataset.placeholder}]` : ''
+      return node.dataset.placeholder ? node.dataset.placeholder : ''
     }
     const children = Array.from(node.childNodes).map(nodeToText).join('')
     if (['DIV', 'P', 'LI', 'BLOCKQUOTE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(node.nodeName)) {
@@ -162,8 +162,8 @@ export default function NoteModal({ initial, onCancel, onSave }) {
 		image.style.width = `${width}px`
 		image.style.height = `${height}px`
 		if (image.dataset.placeholder) {
-			const [typeIndex, meta] = selectedMediaPlaceholder.split('|')
-			const newPlaceholder = meta ? `${typeIndex}|w=${width}` : `${typeIndex}|w=${width}`
+			const [typeIndex, meta] = selectedMediaPlaceholder.replace(/^\[|\]$/g, '').split('|')
+			const newPlaceholder = meta ? `[${typeIndex}|w=${width}]` : `[${typeIndex}|w=${width}]`
 			image.dataset.placeholder = newPlaceholder
 			setSelectedMediaPlaceholder(newPlaceholder)
 		} else if (image.classList.contains('pending-image')) {
