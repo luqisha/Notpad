@@ -20,7 +20,7 @@ class MediaReference(BaseModel):
 
 
 class NoteBase(BaseModel):
-    note_title: str = Field(min_length=10, max_length=100)
+    note_title: str = Field(min_length=1, max_length=100)
     note_body: str = Field(min_length=1, max_length=1000)
     bg_color: str = Field(default="#FFFFFF")
     is_pinned: bool = False
@@ -38,7 +38,7 @@ class NoteCreate(NoteBase):
 
 
 class NoteUpdate(BaseModel):
-    note_title: Optional[str] = Field(default=None, min_length=10, max_length=100)
+    note_title: Optional[str] = Field(default=None, min_length=1, max_length=100)
     note_body: Optional[str] = None
     bg_color: Optional[str] = None
     is_pinned: Optional[bool] = None

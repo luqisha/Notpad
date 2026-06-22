@@ -19,6 +19,7 @@ from app.routes import auth, group
 init_data_files()
 load_dotenv()
 
+
 app = FastAPI(title="Notpad")
 
 app.add_middleware(
@@ -28,7 +29,7 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,7 +59,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         return response
 
-app.add_middleware(RateLimitMiddleware, limit=60, time_window=60)
+app.add_middleware(RateLimitMiddleware, limit=60, time_window=1)
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_key: str):
@@ -76,7 +77,14 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         whitelist_prefixes = (
             "/docs",
             "/openapi.json",
+            "/auth",
+            "/notes",
+            "/notes/",
+            "/groups",
+            "/groups/",
         )
+        # Allow unauthenticated access to static uploads (image/voice files)
+        whitelist_prefixes = whitelist_prefixes + ("/uploads",)
 
         if any(path.startswith(p) for p in whitelist_prefixes):
             return await call_next(request)
