@@ -1,7 +1,12 @@
 from pathlib import Path
+from typing import Optional
+
+from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.schemas.note import Note
 from app.schemas.user import User
+from app.schemas.group import Group
 from app.schemas.media import Voice, Picture
 from app.utils.storage import read_file, write_file
 
@@ -87,3 +92,48 @@ def load_group_notes_list() -> list["GroupNotesItem"]:
 
 def save_group_notes_list(items: list["GroupNotesItem"]) -> None:
     write_file(_GROUP_NOTES_LIST_FILE, [item.model_dump() for item in items])
+
+
+def _find_user_by_id(users: list[User], user_id: str) -> Optional[User]:
+    for user in users:
+        if user.user_id == user_id:
+            return user
+    return None
+
+
+def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
+    for note in notes:
+        if note.note_id == note_id and note.user_id == user_id:
+            return note
+    return None
+
+
+def _find_group_by_id(groups: list[Group], user_id: str, group_id: str) -> Optional[Group]:
+    for group in groups:
+        if group.group_id == group_id and group.user_id == user_id:
+            return group
+    return None
+
+
+def _find_voice_by_id(voices: list[Voice], user_id: str, voice_id: str) -> Optional[Voice]:
+    for voice in voices:
+        if voice.voice_id == voice_id and voice.user_id == user_id:
+            return voice
+    return None
+
+
+def _find_picture_by_id(pictures: list[Picture], user_id: str, picture_id: str) -> Optional[Picture]:
+    for picture in pictures:
+        if picture.picture_id == picture_id and picture.user_id == user_id:
+            return picture
+    return None
+
+
+def _raise_validation_error(exc: Exception) -> None:
+    if isinstance(exc, ValidationError):
+        errors = [
+            f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+            for err in exc.errors()
+        ]
+        raise HTTPException(status_code=422, detail={"validation_errors": errors})
+    raise HTTPException(status_code=422, detail={"validation_errors": [str(exc)]})
