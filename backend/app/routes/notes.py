@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from pydantic import ValidationError
 
 from app.utils.data_loader import load_notes, load_users, save_notes, load_voices, load_pictures, save_voices, save_pictures
-from app.utils.dependencies import require_user_id
+from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.media import Picture, Voice
 from app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
 from app.schemas.user import User
 
-router = APIRouter(prefix="/notes", tags=["notes"], redirect_slashes=False)
+router = APIRouter(prefix="/notes", tags=["notes"], redirect_slashes=False, dependencies=[Depends(verify_api_key)])
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 IMAGE_UPLOAD_DIR = UPLOADS_DIR / "images"
 VOICE_UPLOAD_DIR = UPLOADS_DIR / "voices"

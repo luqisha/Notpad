@@ -8,7 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 import asyncio
 import time
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse
 
 from app.utils.data_loader import init_data_files
 from app.routes import notes
@@ -60,43 +60,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(RateLimitMiddleware, limit=60, time_window=1)
-
-class APIKeyAuthMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, api_key: str):
-        super().__init__(app)
-        self.api_key = api_key
-
-    async def dispatch(self, request, call_next):
-        if request.method == 'OPTIONS':
-            return await call_next(request)
-
-        if self.api_key is None:
-            return JSONResponse({"detail": "API key not configured"}, status_code=500)
-
-        path = request.url.path or ""
-        whitelist_prefixes = (
-            "/docs",
-            "/openapi.json",
-            "/auth",
-            "/notes",
-            "/notes/",
-            "/groups",
-            "/groups/",
-        )
-        # Allow unauthenticated access to static uploads (image/voice files)
-        whitelist_prefixes = whitelist_prefixes + ("/uploads",)
-
-        if any(path.startswith(p) for p in whitelist_prefixes):
-            return await call_next(request)
-
-        api_key_header = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
-
-        if api_key_header != self.api_key:
-            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
-
-        return await call_next(request)
-
-app.add_middleware(APIKeyAuthMiddleware, api_key=os.environ.get("API_KEY"))
 
 app.mount(
     "/uploads",
