@@ -1,16 +1,9 @@
-import { useEffect, useState } from 'react'
-
 export default function Pagination({ pagination, onPageChange, inline = false }) {
   if (!pagination || pagination.total_pages <= 1) {
     return null
   }
 
   const { page, total_pages, has_prev, has_next } = pagination
-  const [pageInput, setPageInput] = useState(page.toString())
-
-  useEffect(() => {
-    setPageInput(page.toString())
-  }, [page])
 
   const goToPage = (value) => {
     const pageNum = Number(value)
@@ -26,24 +19,21 @@ export default function Pagination({ pagination, onPageChange, inline = false })
     return true
   }
 
-  const handleInputChange = (event) => {
-    setPageInput(event.target.value)
-  }
-
   const handleInputKeyDown = (event) => {
     if (event.key === 'Enter') {
-      const valid = goToPage(pageInput)
+      const valid = goToPage(event.currentTarget.value)
       if (!valid) {
-        setPageInput(page.toString())
+        event.currentTarget.value = page.toString()
       }
+      event.currentTarget.blur()
     }
   }
 
-  const handleInputBlur = () => {
-    if (pageInput !== page.toString()) {
-      const valid = goToPage(pageInput)
+  const handleInputBlur = (event) => {
+    if (event.currentTarget.value !== page.toString()) {
+      const valid = goToPage(event.currentTarget.value)
       if (!valid) {
-        setPageInput(page.toString())
+        event.currentTarget.value = page.toString()
       }
     }
   }
@@ -64,8 +54,8 @@ export default function Pagination({ pagination, onPageChange, inline = false })
           type="number"
           min="1"
           max={total_pages}
-          value={pageInput}
-          onChange={handleInputChange}
+          key={page}
+          defaultValue={page}
           onKeyDown={handleInputKeyDown}
           onBlur={handleInputBlur}
           aria-label="Enter page number"

@@ -57,6 +57,7 @@ ALLOWED_VOICE_MIME_TYPES = {
     "audio/aac",
     "audio/amr",
     "audio/webm",
+    "video/webm",
 }
 
 
@@ -601,3 +602,54 @@ def delete_note_image(request: Request, note_id: str, image_id: str, user_id: st
     save_notes(notes)
 
     return {"message": "Image deleted successfully", "note": updated_note}
+
+
+@router.delete("/{note_id}/voices/{voice_id}")
+@limiter.limit("60/minute")
+def delete_note_voice(request: Request, note_id: str, voice_id: str, user_id: str = Depends(require_user_id)):
+    """Delete a voice from a note."""
+
+    notes = load_notes()
+    note = _find_note_by_id(notes, user_id, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    voices = load_voices()
+    voice = _find_voice_by_id(voices, user_id, voice_id)
+    if not voice or voice.note_id != note_id:
+        raise HTTPException(status_code=404, detail="Voice not found")
+
+    # Remove the file from disk
+    voice_path = urlparse(voice.voice_url).path
+    voice_file = VOICE_UPLOAD_DIR / Path(voice_path).name
+    voice_file.unlink(missing_ok=True)
+
+    # Remove voice record
+    voices = [v for v in voices if v.voice_id != voice_id]
+    save_voices(voices)
+
+    # Find the voice index from note references and remove it
+    removed_index = None
+    for ref in note.voices:
+        if ref.id == voice_id:
+            removed_index = ref.index
+            break
+
+    # Update note: remove voice reference and placeholder from body
+    new_voices = [ref for ref in note.voices if ref.id != voice_id]
+    new_body = note.note_body
+    if removed_index is not None:
+        new_body = re.sub(rf'\[AUD:{removed_index}[^\]]*\]\s*', '', new_body).strip()
+
+    for idx, stored in enumerate(notes):
+        if stored.note_id != note_id:
+            continue
+        notes[idx] = stored.model_copy(update={
+            "note_body": new_body,
+            "voices": new_voices,
+        })
+        updated_note = notes[idx]
+        break
+    save_notes(notes)
+
+    return {"message": "Voice deleted successfully", "note": updated_note}

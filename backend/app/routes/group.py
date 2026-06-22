@@ -1,7 +1,9 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.utils.data_loader import (
     load_notes,
@@ -21,8 +23,18 @@ from app.schemas.user import User
 
 router = APIRouter(prefix="/groups", tags=["group"], redirect_slashes=False, dependencies=[Depends(verify_api_key)])
 
+limiter = Limiter(key_func=get_remote_address)
+
+
+def _validate_uuid(value: str, field: str = "id") -> None:
+    try:
+        UUID(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {field}: {value}")
+
 
 @router.get("")
+@limiter.limit("120/minute")
 def get_groups(request: Request, user_id: str = Depends(require_user_id)):
 
     groups = [g for g in load_groups() if g.user_id == user_id]
@@ -37,7 +49,25 @@ def get_groups(request: Request, user_id: str = Depends(require_user_id)):
     return {"groups": result}
 
 
+@router.get("/{group_id}")
+@limiter.limit("120/minute")
+def get_group(request: Request, group_id: str, user_id: str = Depends(require_user_id)):
+
+    _validate_uuid(group_id, "group_id")
+
+    groups = load_groups()
+    existing = _find_group_by_id(groups, user_id, group_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    mappings = {item.group_id: item.note_ids for item in load_group_notes_list()}
+    group_data = existing.model_dump()
+    group_data["note_ids"] = mappings.get(existing.group_id, [])
+    return {"group": group_data}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
+@limiter.limit("30/minute")
 def create_group(request: Request, group: GroupCreate, user_id: str = Depends(require_user_id)):
 
     users = load_users()
@@ -58,7 +88,10 @@ def create_group(request: Request, group: GroupCreate, user_id: str = Depends(re
 
 
 @router.patch("/{group_id}")
+@limiter.limit("30/minute")
 def update_group(request: Request, group_id: str, group: GroupUpdate, user_id: str = Depends(require_user_id)):
+
+    _validate_uuid(group_id, "group_id")
 
     groups = load_groups()
     existing = _find_group_by_id(groups, user_id, group_id)
@@ -81,7 +114,10 @@ def update_group(request: Request, group_id: str, group: GroupUpdate, user_id: s
 
 
 @router.delete("/{group_id}")
+@limiter.limit("30/minute")
 def delete_group(request: Request, group_id: str, user_id: str = Depends(require_user_id)):
+
+    _validate_uuid(group_id, "group_id")
 
     groups = load_groups()
     existing = _find_group_by_id(groups, user_id, group_id)
@@ -98,8 +134,12 @@ def delete_group(request: Request, group_id: str, user_id: str = Depends(require
     return {"message": "Group deleted successfully"}
 
 
-@router.post("/{group_id}/notes", status_code=status.HTTP_201_CREATED)
-def create_group_note(request: Request, group_id: str, note_id: str = None, user_id: str = Depends(require_user_id)):
+@router.post("/{group_id}/notes/{note_id}", status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
+def create_group_note(request: Request, group_id: str, note_id: str, user_id: str = Depends(require_user_id)):
+
+    _validate_uuid(group_id, "group_id")
+    _validate_uuid(note_id, "note_id")
 
     groups = load_groups()
     if not _find_group_by_id(groups, user_id, group_id):
@@ -125,7 +165,11 @@ def create_group_note(request: Request, group_id: str, note_id: str = None, user
 
 
 @router.delete("/{group_id}/notes/{note_id}")
+@limiter.limit("60/minute")
 def delete_group_note(request: Request, group_id: str, note_id: str, user_id: str = Depends(require_user_id)):
+
+    _validate_uuid(group_id, "group_id")
+    _validate_uuid(note_id, "note_id")
 
     groups = load_groups()
     if not _find_group_by_id(groups, user_id, group_id):
@@ -138,9 +182,9 @@ def delete_group_note(request: Request, group_id: str, note_id: str, user_id: st
     mappings = load_group_notes_list()
     for m in mappings:
         if m.group_id == group_id:
-            if note_id not in m.note_ids:
-                raise HTTPException(status_code=404, detail="Note not in group")
-            m.note_ids.remove(note_id)
-            save_group_notes_list(mappings)
-            return {"message": "Note removed from group", "mapping": m.model_dump()}
-    raise HTTPException(status_code=404, detail="Group mapping not found")
+            if note_id in m.note_ids:
+                m.note_ids.remove(note_id)
+                save_group_notes_list(mappings)
+                return {"message": "Note removed from group", "mapping": m.model_dump()}
+            raise HTTPException(status_code=404, detail="Note not in group")
+    raise HTTPException(status_code=404, detail="Note not in group")

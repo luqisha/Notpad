@@ -1,84 +1,32 @@
-export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemoveImage, className = '' }) {
+export default function NoteDisplay({ note, onDelete, onSelect, onPin, className = '' }) {
   if (!note) return null
 
-  function renderBodyPreview(body = '', maxChars = 120) {
-    if (!body) return 'No content yet.'
+  function renderBodyPreview(body = '', maxChars = 140) {
+    if (!body) return ''
 
     const cleanBody = body
       .replace(/\[IMG:[^\]]*\]/g, '')
-      .replace(/\[AUD:[^\]]*\]/g, '[Audio]')
-      .replace(/[\[\]]+/g, '')
+      .replace(/\[AUD:[^\]]*\]/g, '')
+      .replaceAll('[', '')
+      .replaceAll(']', '')
+      .trim()
 
     if (cleanBody.length > maxChars) {
       return `${cleanBody.slice(0, maxChars).trimEnd()}...`
     }
-    return cleanBody || 'No content yet.'
+    return cleanBody
   }
 
-  function getMediaPreviewItems() {
-    const images = Array.isArray(note.mediaImages) ? note.mediaImages : []
-    const voices = Array.isArray(note.mediaVoices) ? note.mediaVoices : []
+  // Get first image for the card banner
+  const images = Array.isArray(note.mediaImages) ? note.mediaImages : []
+  const voices = Array.isArray(note.mediaVoices) ? note.mediaVoices : []
+  const hasImages = images.length > 0
+  const firstImageSrc = hasImages
+    ? (images[0].picture_url || images[0].image_url || images[0].url)
+    : null
 
-    return {
-      images: images.map((image) => ({
-        type: 'image',
-        key: image.picture_id || image.picture_url || image.id,
-        src: image.picture_url || image.image_url || image.url,
-      })),
-      voices: voices.map((voice) => ({
-        type: 'audio',
-        key: voice.voice_id || voice.voice_url || voice.id || voice.picture_id,
-        src: voice.voice_url || voice.url || voice.audio_url || voice.file_url,
-      })),
-    }
-  }
-
-  function renderMediaPreview() {
-    const { images, voices } = getMediaPreviewItems()
-    if (images.length === 0 && voices.length === 0) return null
-
-    const MAX_PREVIEW_IMAGES = 2
-    const MAX_PREVIEW_AUDIO = 2
-
-    let visibleItems = []
-    if (images.length > 0 && voices.length > 0) {
-      visibleItems = [
-        ...images.slice(0, MAX_PREVIEW_IMAGES - 1),
-        ...voices.slice(0, MAX_PREVIEW_AUDIO)
-      ]
-    } else if (images.length > 0) {
-      visibleItems = images.slice(0, MAX_PREVIEW_IMAGES)
-    } else if (voices.length > 0) {
-      visibleItems = voices.slice(0, MAX_PREVIEW_AUDIO)
-    }
-
-    const totalCount = images.length + voices.length
-    const moreCount = Math.max(0, totalCount - visibleItems.length)
-
-    return (
-      <div className="note-media-preview-row">
-        {visibleItems.map((item) => (
-          item.type === 'image' ? (
-            <div key={item.key} className="note-preview-image-wrapper">
-              <img
-                src={item.src}
-                alt="Image preview"
-                className="note-preview-media note-preview-image"
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          ) : (
-            <div key={item.key} className="note-preview-media note-preview-audio" onClick={(e) => e.stopPropagation()}>
-              <audio controls src={item.src} className="note-preview-audio-element" style={{ width: '180px', minWidth: '180px' }} />
-            </div>
-          )
-        ))}
-        {moreCount > 0 && (
-          <div className="note-media-more">+{moreCount}</div>
-        )}
-      </div>
-    )
-  }
+  // Rest of images for thumbnail list inside card
+  const otherImages = hasImages ? images.slice(1) : []
 
   return (
     <div
@@ -93,25 +41,109 @@ export default function NoteDisplay({ note, onEdit, onDelete, onSelect, onRemove
         }
       } : undefined}
     >
+      {/* 1. Full-bleed banner image at the top of the card (Google Keep style) */}
+      {firstImageSrc && (
+        <div className="note-card-image-wrapper">
+          <img
+            src={firstImageSrc}
+            alt="Note attachment banner"
+            className="note-card-image"
+            loading="lazy"
+          />
+        </div>
+      )}
+
+      {/* 2. Note Text Content */}
       <div className="note-body">
-        <strong className="note-title">{note.note_title || note.title || 'Untitled'}</strong>
+        {note.note_title && (
+          <strong className="note-title">{note.note_title}</strong>
+        )}
         <p className="note-text">
-          {renderBodyPreview(note.note_body || note.body || '')}
+          {renderBodyPreview(note.note_body || '') || (firstImageSrc || voices.length > 0 ? '' : 'Empty note')}
         </p>
-        {renderMediaPreview()}
+
+        {/* 3. Audio & Voice Previews */}
+        {voices.length > 0 && (
+          <div className="note-media-preview-row">
+            {voices.slice(0, 2).map((voice) => {
+              const src = voice.voice_url || voice.url || voice.audio_url || voice.file_url
+              const key = voice.voice_id || voice.id || src
+              return (
+                <div key={key} className="note-preview-media" onClick={(e) => e.stopPropagation()}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '4px' }}>
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  </svg>
+                  <audio controls src={src} className="note-preview-audio-element" />
+                </div>
+              )
+            })}
+            {voices.length > 2 && (
+              <div className="note-media-more">+{voices.length - 2}</div>
+            )}
+          </div>
+        )}
+
+        {/* 4. Other Images thumbnail list */}
+        {otherImages.length > 0 && (
+          <div className="note-media-preview-row">
+            {otherImages.slice(0, 3).map((image) => {
+              const src = image.picture_url || image.image_url || image.url
+              const key = image.picture_id || image.id || src
+              return (
+                <div key={key} className="note-preview-image-wrapper" onClick={(e) => e.stopPropagation()}>
+                  <img src={src} alt="Thumbnail preview" className="note-preview-image note-preview-media" />
+                </div>
+              )
+            })}
+            {otherImages.length > 3 && (
+              <div className="note-media-more">+{otherImages.length - 3}</div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* 5. Keep-style Action Icons (shown on hover) */}
       <div className="note-actions">
-        <div className="note-actions-left">
-          {typeof onEdit === 'function' && (
-            <button className="btn ghost" onClick={(e) => { e.stopPropagation(); onEdit(note) }}>
-              Edit
-            </button>
+        <div className="note-actions-left" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`card-icon-btn ${note.is_pinned ? 'pinned' : ''}`}
+            title={note.is_pinned ? "Unpin note" : "Pin note"}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (typeof onPin === 'function') {
+                onPin()
+              }
+            }}
+            style={{ border: 'none', background: 'none', padding: 0 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill={note.is_pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 10V8a2 2 0 0 0-2-2h-1.5c-1.1 0-2-.9-2-2V3a1 1 0 0 0-1-1H9.5a1 1 0 0 0-1 1v1c0 1.1-.9 2-2 2H5a2 2 0 0 0-2 2v2a2 2 0 0 0 1.7 2H6.5c1.1 0 2 .9 2 2v1c0 .6.4 1 1 1h5c.6 0 1-.4 1-1v-1c0-1.1.9-2 2-2h1.8a2 2 0 0 0 1.7-2z" />
+              <line x1="12" y1="17" x2="12" y2="22" />
+            </svg>
+          </button>
+          {voices.length > 0 && (
+            <div className="card-icon-btn" title="Has Voice Note">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              </svg>
+            </div>
           )}
         </div>
-        <div className="note-actions-right">
+        <div className="note-actions-right" onClick={(e) => e.stopPropagation()}>
           {typeof onDelete === 'function' && (
-            <button className="btn danger" onClick={(e) => { e.stopPropagation(); onDelete(note) }}>
-              Delete
+            <button
+              type="button"
+              className="card-icon-btn"
+              onClick={onDelete}
+              title="Delete note"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
             </button>
           )}
         </div>
