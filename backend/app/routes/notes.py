@@ -1,3 +1,4 @@
+import filetype
 import hashlib
 import re
 import shutil
@@ -7,7 +8,8 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from pydantic import ValidationError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.utils.data_loader import (
     load_notes,
@@ -21,7 +23,6 @@ from app.utils.data_loader import (
     _find_note_by_id,
     _find_voice_by_id,
     _find_picture_by_id,
-    _raise_validation_error,
 )
 from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.media import Picture, Voice
@@ -29,16 +30,77 @@ from app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
 from app.schemas.user import User
 
 router = APIRouter(prefix="/notes", tags=["notes"], redirect_slashes=False, dependencies=[Depends(verify_api_key)])
+
+limiter = Limiter(key_func=get_remote_address)
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 IMAGE_UPLOAD_DIR = UPLOADS_DIR / "images"
 VOICE_UPLOAD_DIR = UPLOADS_DIR / "voices"
+
+MAX_IMAGE_SIZE = 10 * 1024 * 1024
+MAX_VOICE_SIZE = 50 * 1024 * 1024
+
+ALLOWED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+}
+
+ALLOWED_VOICE_MIME_TYPES = {
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/flac",
+    "audio/aac",
+    "audio/amr",
+    "audio/webm",
+    "video/webm",
+}
+
+
+def _validate_upload_file(file: UploadFile, allowed_mimes: set[str], max_size: int) -> None:
+    content_type = file.content_type
+    if not content_type or content_type not in allowed_mimes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed types: {', '.join(sorted(allowed_mimes))}",
+        )
+
+    file.file.seek(0)
+    header = file.file.read(8192)
+    file.file.seek(0)
+
+    kind = filetype.guess(header)
+    if kind is None or kind.mime not in allowed_mimes:
+        detected = kind.mime if kind else "unknown"
+        raise HTTPException(
+            status_code=400,
+            detail=f"File content does not match allowed types. Detected: {detected}",
+        )
+
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+
+    if file_size > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size exceeds maximum allowed size of {max_size // (1024 * 1024)}MB",
+        )
 
 
 def _make_upload_url(request: Request, subpath: str) -> str:
     return str(request.base_url).rstrip("/") + f"/uploads/{subpath}"
 
 
-def _save_upload_file(file: UploadFile, target_dir: Path) -> tuple[str, str]:
+def _save_upload_file(
+    file: UploadFile, target_dir: Path, allowed_mimes: set[str], max_size: int
+) -> tuple[str, str]:
+    _validate_upload_file(file, allowed_mimes, max_size)
+
     target_dir.mkdir(parents=True, exist_ok=True)
     extension = Path(file.filename).suffix
     if not extension:
@@ -75,6 +137,7 @@ def _get_next_voice_index(note: Note) -> int:
 
 
 @router.post("/with-images")
+@limiter.limit("30/minute")
 def create_note_with_images(
     request: Request,
     note_title: str = Form(...),
@@ -97,23 +160,20 @@ def create_note_with_images(
     # Convert string to boolean
     is_pinned_bool = is_pinned.lower() in ("true", "1", "yes")
 
-    try:
-        note = Note(
-            note_id=str(uuid.uuid4()),
-            user_id=user_id,
-            note_title=note_title,
-            note_body=note_body,
-            bg_color=bg_color,
-            is_pinned=is_pinned_bool,
-            images=[],
-            voices=[],
-        )
-    except (ValidationError, ValueError) as exc:
-        _raise_validation_error(exc)
+    note = Note(
+        note_id=str(uuid.uuid4()),
+        user_id=user_id,
+        note_title=note_title,
+        note_body=note_body,
+        bg_color=bg_color,
+        is_pinned=is_pinned_bool,
+        images=[],
+        voices=[],
+    )
 
     if images:
         for file in images:
-            filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR)
+            filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_SIZE)
             image_url = _make_upload_url(request, f"images/{filename}")
             picture = Picture(
                 picture_id=str(uuid.uuid4()),
@@ -138,6 +198,7 @@ def create_note_with_images(
 
 
 @router.post("")
+@limiter.limit("60/minute")
 def create_note(request: Request, note: NoteCreate, user_id: str = Depends(require_user_id)):
 
     users = load_users()
@@ -145,14 +206,11 @@ def create_note(request: Request, note: NoteCreate, user_id: str = Depends(requi
         raise HTTPException(status_code=404, detail="User not found")
 
     notes = load_notes()
-    try:
-        note = Note(
-            note_id=str(uuid.uuid4()),
-            user_id=user_id,
-            **note.model_dump(),
-        )
-    except (ValidationError, ValueError) as exc:
-        _raise_validation_error(exc)
+    note = Note(
+        note_id=str(uuid.uuid4()),
+        user_id=user_id,
+        **note.model_dump(),
+    )
 
     notes.append(note)
     save_notes(notes)
@@ -160,6 +218,7 @@ def create_note(request: Request, note: NoteCreate, user_id: str = Depends(requi
 
 
 @router.get("")
+@limiter.limit("120/minute")
 def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[str] = None, user_id: str = Depends(require_user_id)):
 
     # Validate pagination parameters
@@ -213,7 +272,24 @@ def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[
     }
 
 
+def _extract_image_indices_from_body(body: str) -> set[int]:
+    """Extract all image indices from placeholders in the note body."""
+    indices = set()
+    for match in re.finditer(r'\[IMG:(\d+)(\|[^\]]+)?\]', body):
+        indices.add(int(match.group(1)))
+    return indices
+
+
+def _extract_voice_indices_from_body(body: str) -> set[int]:
+    """Extract all voice indices from placeholders in the note body."""
+    indices = set()
+    for match in re.finditer(r'\[AUD:(\d+)(\|[^\]]+)?\]', body):
+        indices.add(int(match.group(1)))
+    return indices
+
+
 @router.patch("/{note_id}")
+@limiter.limit("60/minute")
 def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str = Depends(require_user_id)):
 
     updates = note.model_dump(exclude_none=True)
@@ -225,14 +301,49 @@ def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str =
     if not existing:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    try:
-        for index, stored in enumerate(notes):
-            if stored.note_id != note_id:
-                continue
-            notes[index] = stored.model_copy(update=updates)
-            break
-    except ValidationError as exc:
-        _raise_validation_error(exc)
+    new_body = updates.get("note_body", existing.note_body)
+    referenced_image_indices = _extract_image_indices_from_body(new_body)
+    referenced_voice_indices = _extract_voice_indices_from_body(new_body)
+
+    current_image_refs = {ref.index: ref for ref in existing.images}
+    orphaned_image_refs = [ref for idx, ref in current_image_refs.items() if idx not in referenced_image_indices]
+
+    if orphaned_image_refs:
+        pictures = load_pictures()
+        for ref in orphaned_image_refs:
+            picture = _find_picture_by_id(pictures, user_id, ref.id)
+            if picture:
+                picture_path = urlparse(picture.picture_url).path
+                image_file = IMAGE_UPLOAD_DIR / Path(picture_path).name
+                image_file.unlink(missing_ok=True)
+                pictures = [p for p in pictures if p.picture_id != ref.id]
+        save_pictures(pictures)
+
+    updated_images = [ref for ref in existing.images if ref.index in referenced_image_indices]
+
+    current_voice_refs = {ref.index: ref for ref in existing.voices}
+    orphaned_voice_refs = [ref for idx, ref in current_voice_refs.items() if idx not in referenced_voice_indices]
+
+    if orphaned_voice_refs:
+        voices = load_voices()
+        for ref in orphaned_voice_refs:
+            voice = _find_voice_by_id(voices, user_id, ref.id)
+            if voice:
+                voice_path = urlparse(voice.voice_url).path
+                voice_file = VOICE_UPLOAD_DIR / Path(voice_path).name
+                voice_file.unlink(missing_ok=True)
+                voices = [v for v in voices if v.voice_id != ref.id]
+        save_voices(voices)
+
+    updated_voices = [ref for ref in existing.voices if ref.index in referenced_voice_indices]
+
+    final_updates = {**updates, "images": updated_images, "voices": updated_voices}
+
+    for index, stored in enumerate(notes):
+        if stored.note_id != note_id:
+            continue
+        notes[index] = stored.model_copy(update=final_updates)
+        break
 
     save_notes(notes)
     updated = _find_note_by_id(notes, user_id, note_id)
@@ -240,6 +351,7 @@ def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str =
 
 
 @router.delete("/{note_id}")
+@limiter.limit("60/minute")
 def delete_note(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
 
     notes = load_notes()
@@ -253,6 +365,7 @@ def delete_note(request: Request, note_id: str, user_id: str = Depends(require_u
 
 
 @router.post("/{note_id}/images")
+@limiter.limit("30/minute")
 def upload_note_image(request: Request, note_id: str, file: UploadFile = File(...), user_id: str = Depends(require_user_id)):
     """Upload an image and return a placeholder token for the note body."""
 
@@ -261,7 +374,7 @@ def upload_note_image(request: Request, note_id: str, file: UploadFile = File(..
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR)
+    filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_SIZE)
     image_url = _make_upload_url(request, f"images/{filename}")
 
     pictures = load_pictures()
@@ -330,6 +443,7 @@ def upload_note_image(request: Request, note_id: str, file: UploadFile = File(..
 
 
 @router.post("/{note_id}/voices")
+@limiter.limit("30/minute")
 def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(...), user_id: str = Depends(require_user_id)):
     """Upload a voice file and return a placeholder token for the note body."""
 
@@ -338,7 +452,7 @@ def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(..
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    filename, _ = _save_upload_file(file, VOICE_UPLOAD_DIR)
+    filename, _ = _save_upload_file(file, VOICE_UPLOAD_DIR, ALLOWED_VOICE_MIME_TYPES, MAX_VOICE_SIZE)
     voice_url = _make_upload_url(request, f"voices/{filename}")
     voice = Voice(
         voice_id=str(uuid.uuid4()),
@@ -378,6 +492,7 @@ def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(..
 
 
 @router.get("/{note_id}/voices")
+@limiter.limit("120/minute")
 def get_note_voices(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
     """Get all voices for a specific note."""
 
@@ -391,6 +506,7 @@ def get_note_voices(request: Request, note_id: str, user_id: str = Depends(requi
 
 
 @router.get("/{note_id}/voices/{voice_id}")
+@limiter.limit("120/minute")
 def get_note_voice(request: Request, note_id: str, voice_id: str, user_id: str = Depends(require_user_id)):
     """Get a specific voice from a note."""
 
@@ -407,6 +523,7 @@ def get_note_voice(request: Request, note_id: str, voice_id: str, user_id: str =
 
 
 @router.get("/{note_id}/images")
+@limiter.limit("120/minute")
 def get_note_images(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
     """Get all images for a specific note."""
 
@@ -420,6 +537,7 @@ def get_note_images(request: Request, note_id: str, user_id: str = Depends(requi
 
 
 @router.get("/{note_id}/images/{image_id}")
+@limiter.limit("120/minute")
 def get_note_image(request: Request, note_id: str, image_id: str, user_id: str = Depends(require_user_id)):
     """Get a specific image from a note."""
 
@@ -436,6 +554,7 @@ def get_note_image(request: Request, note_id: str, image_id: str, user_id: str =
 
 
 @router.delete("/{note_id}/images/{image_id}")
+@limiter.limit("60/minute")
 def delete_note_image(request: Request, note_id: str, image_id: str, user_id: str = Depends(require_user_id)):
     """Delete an image from a note."""
 
@@ -483,3 +602,54 @@ def delete_note_image(request: Request, note_id: str, image_id: str, user_id: st
     save_notes(notes)
 
     return {"message": "Image deleted successfully", "note": updated_note}
+
+
+@router.delete("/{note_id}/voices/{voice_id}")
+@limiter.limit("60/minute")
+def delete_note_voice(request: Request, note_id: str, voice_id: str, user_id: str = Depends(require_user_id)):
+    """Delete a voice from a note."""
+
+    notes = load_notes()
+    note = _find_note_by_id(notes, user_id, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    voices = load_voices()
+    voice = _find_voice_by_id(voices, user_id, voice_id)
+    if not voice or voice.note_id != note_id:
+        raise HTTPException(status_code=404, detail="Voice not found")
+
+    # Remove the file from disk
+    voice_path = urlparse(voice.voice_url).path
+    voice_file = VOICE_UPLOAD_DIR / Path(voice_path).name
+    voice_file.unlink(missing_ok=True)
+
+    # Remove voice record
+    voices = [v for v in voices if v.voice_id != voice_id]
+    save_voices(voices)
+
+    # Find the voice index from note references and remove it
+    removed_index = None
+    for ref in note.voices:
+        if ref.id == voice_id:
+            removed_index = ref.index
+            break
+
+    # Update note: remove voice reference and placeholder from body
+    new_voices = [ref for ref in note.voices if ref.id != voice_id]
+    new_body = note.note_body
+    if removed_index is not None:
+        new_body = re.sub(rf'\[AUD:{removed_index}[^\]]*\]\s*', '', new_body).strip()
+
+    for idx, stored in enumerate(notes):
+        if stored.note_id != note_id:
+            continue
+        notes[idx] = stored.model_copy(update={
+            "note_body": new_body,
+            "voices": new_voices,
+        })
+        updated_note = notes[idx]
+        break
+    save_notes(notes)
+
+    return {"message": "Voice deleted successfully", "note": updated_note}

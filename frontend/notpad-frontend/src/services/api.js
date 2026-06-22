@@ -102,8 +102,8 @@ export const apiClient = {
 
   updateNote(noteId, updates) {
     const body = {};
-    if (updates.note_title) body.note_title = updates.note_title;
-    if (updates.note_body) body.note_body = updates.note_body;
+    if (typeof updates.note_title === 'string') body.note_title = updates.note_title;
+    if (typeof updates.note_body === 'string') body.note_body = updates.note_body;
     if (updates.bg_color) body.bg_color = updates.bg_color;
     if (typeof updates.is_pinned === 'boolean') body.is_pinned = updates.is_pinned;
 
@@ -135,7 +135,7 @@ export const apiClient = {
 
   updateGroup(groupId, updates) {
     const body = {};
-    if (updates.name) body.name = updates.name;
+    if (typeof updates.name === 'string') body.name = updates.name;
     if (typeof updates.description === 'string') body.description = updates.description;
 
     return this.request(`/groups/${groupId}`, {
@@ -151,8 +151,8 @@ export const apiClient = {
   },
 
   addNoteToGroup(groupId, noteId) {
-    return this.request(`/groups/${groupId}/notes?note_id=${noteId}`, {
-      method: 'POST',
+    return this.request(`/groups/${groupId}/notes/${noteId}`, {
+        method: 'POST',
     });
   },
 

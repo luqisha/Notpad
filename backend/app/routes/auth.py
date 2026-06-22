@@ -2,14 +2,17 @@ import uuid
 
 import bcrypt
 from fastapi import APIRouter, HTTPException, Request, Depends
-from pydantic import ValidationError
 from typing import Optional
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.utils.data_loader import load_users, save_users
 from app.schemas.user import User, UserCreate
 from app.utils.dependencies import verify_api_key
 
-router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(verify_api_key)])
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _find_user_by_mail(users: list[User], email: str) -> Optional[User]:
@@ -29,11 +32,6 @@ def _verify_password(password: str, hashed: str) -> bool:
 
 @router.post("/register")
 def register(credentials: UserCreate):
-    try:
-        credentials = UserCreate(user_mail=credentials.user_mail, password=credentials.password)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail="Invalid registration data")
-
     users = load_users()
 
     if _find_user_by_mail(users, credentials.user_mail):
@@ -51,12 +49,8 @@ def register(credentials: UserCreate):
 
 
 @router.post("/login")
+@limiter.limit("30/minute")
 def login(request: Request, credentials: UserCreate):
-    try:
-        credentials = UserCreate(user_mail=credentials.user_mail, password=credentials.password)
-    except ValidationError as exc:
-        raise HTTPException(status_code=400, detail="Invalid login data")
-
     users = load_users()
     user = _find_user_by_mail(users, credentials.user_mail)
     if not user:

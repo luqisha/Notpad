@@ -1,15 +1,16 @@
-import os
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
+
+from app.core.config import settings
 
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def verify_api_key(api_key: str = Security(api_key_header)) -> str:
-    expected_key = os.environ.get("API_KEY")
+    expected_key = settings.api_key
     if not expected_key:
         raise HTTPException(status_code=500, detail="API key not configured")
     if not api_key:

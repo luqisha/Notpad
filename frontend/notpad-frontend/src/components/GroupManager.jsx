@@ -2,41 +2,34 @@ import { useState } from 'react'
 import { apiClient } from '../services/api'
 
 export default function GroupManager({ group, notes, onClose, onUpdate, onDelete }) {
-  const [name, setName] = useState(group?.name || group?.group_name || '')
-  const [description, setDescription] = useState(group?.description || group?.group_description || '')
+  const [name, setName] = useState(group?.name || '')
+  const [description, setDescription] = useState(group?.description || '')
   const [error, setError] = useState('')
   const [selectedNotes, setSelectedNotes] = useState(group?.note_ids || [])
   const [saving, setSaving] = useState(false)
 
-  async function handleAddNote(noteId) {
-    if (selectedNotes.includes(noteId)) return
-    setSaving(true)
-    try {
-      await apiClient.addNoteToGroup(group.group_id, noteId)
-      setSelectedNotes([...selectedNotes, noteId])
-    } catch (err) {
-      setError('Failed to add note: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleRemoveNote(noteId) {
-    setSaving(true)
-    try {
-      await apiClient.removeNoteFromGroup(group.group_id, noteId)
-      setSelectedNotes(selectedNotes.filter(id => id !== noteId))
-    } catch (err) {
-      setError('Failed to remove note: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
+  function handleToggleNote(noteId) {
+    setSelectedNotes(prev =>
+      prev.includes(noteId)
+        ? prev.filter(id => id !== noteId)
+        : [...prev, noteId]
+    )
   }
 
   async function handleSave() {
     setSaving(true)
+    setError('')
     try {
-      await apiClient.updateGroup(group.group_id, { name, description })
+      const originalIds = group?.note_ids || []
+      const toAdd = selectedNotes.filter(id => !originalIds.includes(id))
+      const toRemove = originalIds.filter(id => !selectedNotes.includes(id))
+
+      await Promise.all([
+        apiClient.updateGroup(group.group_id, { name, description }),
+        ...toAdd.map(id => apiClient.addNoteToGroup(group.group_id, id)),
+        ...toRemove.map(id => apiClient.removeNoteFromGroup(group.group_id, id)),
+      ])
+
       onUpdate?.()
       onClose?.()
     } catch (err) {
@@ -105,7 +98,7 @@ export default function GroupManager({ group, notes, onClose, onUpdate, onDelete
                     </div>
                     <button
                       className="btn danger"
-                      onClick={() => handleRemoveNote(noteId)}
+                      onClick={() => handleToggleNote(noteId)}
                       disabled={saving}
                     >
                       Remove
@@ -128,7 +121,7 @@ export default function GroupManager({ group, notes, onClose, onUpdate, onDelete
                     </div>
                     <button
                       className="btn secondary"
-                      onClick={() => handleAddNote(note.note_id)}
+                      onClick={() => handleToggleNote(note.note_id)}
                       disabled={saving}
                     >
                       Add

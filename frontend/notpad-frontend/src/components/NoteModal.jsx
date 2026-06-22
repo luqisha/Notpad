@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { apiClient } from '../services/api'
 
 function escapeHtml(text = '') {
@@ -44,7 +44,14 @@ function findImageUrlByIndex(images, index) {
   return ref?.picture_url || ref?.image_url || ref?.url || null
 }
 
-function bodyToHtml(body = '', images = []) {
+function findVoiceUrlByIndex(voices, index) {
+  if (!voices) return null
+  const ref = Array.isArray(voices) ? voices.find(item => item.index === index) : null
+  if (!ref) return null
+  return ref?.voice_url || ref?.url || ref?.audio_url || ref?.file_url || null
+}
+
+function bodyToHtml(body = '', images = [], voices = []) {
   const escaped = escapeHtml(body)
   return escaped.replace(/\[(IMG|AUD):(\d+)(\|[^\]]+)?\]/g, (match, type, index) => {
     const meta = parsePlaceholderMeta(match)?.meta || {}
@@ -56,7 +63,10 @@ function bodyToHtml(body = '', images = []) {
       return `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}" style="${widthStyle} vertical-align:middle; margin:4px;" />`
     }
     if (type === 'AUD') {
-      return `<span class="note-placeholder">${escapeHtml(match)}</span>`
+      const src = findVoiceUrlByIndex(voices, Number(index))
+      if (!src) return `<span class="note-placeholder">${escapeHtml(match)}</span>`
+      const dataPlaceholder = serializePlaceholder(type, Number(index), meta)
+      return `<audio controls class="note-body-audio editor-audio" contenteditable="false" data-placeholder="${dataPlaceholder}" src="${src}" style="width:100%; max-width:400px; margin:8px 0;"></audio>`
     }
     return `<span class="note-placeholder">${escapeHtml(match)}</span>`
   }).replace(/\n/g, '<br>')
@@ -73,7 +83,7 @@ function htmlToBody(html = '') {
       return '\n'
     }
     if (node.nodeName === 'IMG' || node.nodeName === 'AUDIO') {
-      return node.dataset.placeholder ? `[${node.dataset.placeholder}]` : ''
+      return node.dataset.placeholder ? node.dataset.placeholder : ''
     }
     const children = Array.from(node.childNodes).map(nodeToText).join('')
     if (['DIV', 'P', 'LI', 'BLOCKQUOTE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(node.nodeName)) {
@@ -86,550 +96,612 @@ function htmlToBody(html = '') {
 }
 
 export default function NoteModal({ initial, onCancel, onSave }) {
- 	const [title, setTitle] = useState(initial?.title || '')
- 	const [error, setError] = useState('')
- 	const [uploading, setUploading] = useState(false)
- 	const [selectedMediaPlaceholder, setSelectedMediaPlaceholder] = useState(null)
- 	const [selectedMediaWidth, setSelectedMediaWidth] = useState(null)
- 	const [bodyLength, setBodyLength] = useState((initial?.body || '').length)
- 	const [isResizing, setIsResizing] = useState(false)
- 	const [handlePos, setHandlePos] = useState(null)
- 	const [isRecording, setIsRecording] = useState(false)
- 	const [recordingTime, setRecordingTime] = useState(0)
- 	const editorRef = useRef(null)
- 	const pendingFilesRef = useRef({})
- 	const selectedImageEl = useRef(null)
- 	const resizeStartPos = useRef({ x: 0, w: 0, aspect: 1 })
- 	const savedRangeRef = useRef(null)
- 	const mediaRecorderRef = useRef(null)
- 	const audioChunksRef = useRef([])
- 	const recordingTimerRef = useRef(null)
+  const [title, setTitle] = useState(initial?.title || initial?.note_title || '')
+  const [error, setError] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [selectedMediaPlaceholder, setSelectedMediaPlaceholder] = useState(null)
+  const [selectedMediaWidth, setSelectedMediaWidth] = useState(null)
+  const [bodyLength, setBodyLength] = useState((initial?.body || initial?.note_body || '').length)
+  const [isResizing, setIsResizing] = useState(false)
+  const [handlePos, setHandlePos] = useState(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
 
-	const isEdit = Boolean(initial?.id)
-	const noteImages = initial?.mediaImages || []
+  const contentRef = useRef(null)
+  const editorRef = useRef(null)
+  const pendingFilesRef = useRef({})
+  const selectedImageEl = useRef(null)
+  const resizeStartPos = useRef({ x: 0, w: 0, aspect: 1 })
+  const savedRangeRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+  const recordingTimerRef = useRef(null)
 
-	useEffect(() => {
-		if (editorRef.current) {
-			if (initial?.id && initial?.body) {
-				editorRef.current.innerHTML = bodyToHtml(initial.body, noteImages)
-			} else {
-				editorRef.current.innerHTML = ''
-			}
-		}
-	}, [])
+  const isEdit = Boolean(initial?.id || initial?.note_id)
 
-	function handleEditorInput() {
-		if (!editorRef.current) return
-		setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
-	}
+  useEffect(() => {
+    if (editorRef.current) {
+      const noteImages = initial?.mediaImages || []
+      const noteVoices = initial?.mediaVoices || []
+      const body = initial?.body || initial?.note_body || ''
+      if (body) {
+        editorRef.current.innerHTML = bodyToHtml(body, noteImages, noteVoices)
+      } else {
+        editorRef.current.innerHTML = ''
+      }
+    }
+  }, [initial])
 
-	function handleEditorClick(event) {
-		const img = event.target.closest('.editor-image')
-		if (img) {
-			const width = parseInt(img.style.width) || 300
-			selectedImageEl.current = img
-			if (img.dataset.placeholder) {
-				setSelectedMediaPlaceholder(img.dataset.placeholder)
-			} else if (img.classList.contains('pending-image')) {
-				setSelectedMediaPlaceholder(`__pending__:${img.dataset.pendingId}`)
-			} else {
-				return
-			}
-			setSelectedMediaWidth(width)
-			editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
-			img.classList.add('selected-image')
-			return
-		}
-		selectedImageEl.current = null
-		setHandlePos(null)
-		editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
-		setSelectedMediaPlaceholder(null)
-		setSelectedMediaWidth(null)
-	}
+  // Backdrop click auto-save helper
+  function handleBackdropClick(e) {
+    if (contentRef.current && !contentRef.current.contains(e.target)) {
+      submit(e)
+    }
+  }
 
-	function updateSelectedImageWidth(width) {
-		if (!selectedMediaPlaceholder || !editorRef.current) return
-		let image
-		if (selectedMediaPlaceholder.startsWith('__pending__:')) {
-			const pendingId = selectedMediaPlaceholder.replace('__pending__:', '')
-			image = editorRef.current.querySelector(`img[data-pending-id="${CSS.escape(pendingId)}"]`)
-		} else {
-			image = editorRef.current.querySelector(`img[data-placeholder="${CSS.escape(selectedMediaPlaceholder)}"]`)
-		}
-		if (!image) return
-		const aspect = (image.naturalWidth / image.naturalHeight) || 1
-		const height = Math.round(width / aspect)
-		image.style.width = `${width}px`
-		image.style.height = `${height}px`
-		if (image.dataset.placeholder) {
-			const [typeIndex, meta] = selectedMediaPlaceholder.split('|')
-			const newPlaceholder = meta ? `${typeIndex}|w=${width}` : `${typeIndex}|w=${width}`
-			image.dataset.placeholder = newPlaceholder
-			setSelectedMediaPlaceholder(newPlaceholder)
-		} else if (image.classList.contains('pending-image')) {
-			image.dataset.resizeWidth = width
-			setSelectedMediaPlaceholder(selectedMediaPlaceholder)
-		}
-		setSelectedMediaWidth(width)
-	}
+  function handleEditorInput() {
+    if (!editorRef.current) return
+    setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
+  }
 
-	function handleResizeMouseDown(e) {
-		e.preventDefault()
-		e.stopPropagation()
-		const img = selectedImageEl.current
-		if (!img) return
-		const currentWidth = parseInt(img.style.width) || Math.min(img.naturalWidth || 300, 800)
-		resizeStartPos.current = { x: e.clientX, w: currentWidth, aspect: (img.naturalWidth / img.naturalHeight) || 1 }
-		setIsResizing(true)
-		document.body.style.cursor = 'nwse-resize'
-		document.body.style.userSelect = 'none'
-	}
+  function handleEditorClick(event) {
+    const img = event.target.closest('.editor-image')
+    if (img) {
+      const width = parseInt(img.style.width) || 300
+      selectedImageEl.current = img
+      if (img.dataset.placeholder) {
+        setSelectedMediaPlaceholder(img.dataset.placeholder)
+      } else if (img.classList.contains('pending-image')) {
+        setSelectedMediaPlaceholder(`__pending__:${img.dataset.pendingId}`)
+      } else {
+        return
+      }
+      setSelectedMediaWidth(width)
+      editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
+      img.classList.add('selected-image')
+      return
+    }
+    selectedImageEl.current = null
+    setHandlePos(null)
+    editorRef.current?.querySelectorAll('.editor-image.selected-image').forEach(el => el.classList.remove('selected-image'))
+    setSelectedMediaPlaceholder(null)
+    setSelectedMediaWidth(null)
+  }
 
-	useEffect(() => {
-		if (!isResizing) return
-		function onMouseMove(e) {
-			const img = selectedImageEl.current
-			if (!img) return
-			const dx = e.clientX - resizeStartPos.current.x
-			const newWidth = Math.max(80, Math.min(1200, resizeStartPos.current.w + dx))
-			const newHeight = Math.round(newWidth / resizeStartPos.current.aspect)
-			img.style.width = `${newWidth}px`
-			img.style.height = `${newHeight}px`
-		}
-		function onMouseUp() {
-			setIsResizing(false)
-			document.body.style.cursor = ''
-			document.body.style.userSelect = ''
-			if (selectedImageEl.current && selectedMediaPlaceholder) {
-				const w = parseInt(selectedImageEl.current.style.width)
-				updateSelectedImageWidth(w || 300)
-			}
-		}
-		window.addEventListener('mousemove', onMouseMove)
-		window.addEventListener('mouseup', onMouseUp)
-		return () => {
-			window.removeEventListener('mousemove', onMouseMove)
-			window.removeEventListener('mouseup', onMouseUp)
-		}
-	}, [isResizing])
+  const updateSelectedImageWidth = useCallback((width) => {
+    if (!selectedMediaPlaceholder || !editorRef.current) return
+    let image
+    if (selectedMediaPlaceholder.startsWith('__pending__:')) {
+      const pendingId = selectedMediaPlaceholder.replace('__pending__:', '')
+      image = editorRef.current.querySelector(`img[data-pending-id="${CSS.escape(pendingId)}"]`)
+    } else {
+      image = editorRef.current.querySelector(`img[data-placeholder="${CSS.escape(selectedMediaPlaceholder)}"]`)
+    }
+    if (!image) return
+    const aspect = (image.naturalWidth / image.naturalHeight) || 1
+    const height = Math.round(width / aspect)
+    image.style.width = `${width}px`
+    image.style.height = `${height}px`
+    if (image.dataset.placeholder) {
+      const parsed = parsePlaceholderMeta(selectedMediaPlaceholder)
+      if (!parsed) return
+      const newPlaceholder = serializePlaceholder(parsed.type, parsed.index, { ...parsed.meta, width })
+      image.dataset.placeholder = newPlaceholder
+      setSelectedMediaPlaceholder(newPlaceholder)
+    } else if (image.classList.contains('pending-image')) {
+      image.dataset.resizeWidth = width
+      setSelectedMediaPlaceholder(selectedMediaPlaceholder)
+    }
+    setSelectedMediaWidth(width)
+  }, [selectedMediaPlaceholder])
 
-	useEffect(() => {
-		if (!selectedMediaPlaceholder || !selectedImageEl.current) {
-			setHandlePos(null)
-			return
-		}
-		function updatePos() {
-			const img = selectedImageEl.current
-			if (!img || !editorRef.current) return
-			const imgRect = img.getBoundingClientRect()
-			const wrapper = editorRef.current.parentElement
-			if (!wrapper) return
-			const wrapperRect = wrapper.getBoundingClientRect()
-			setHandlePos({
-				top: imgRect.bottom - wrapperRect.top - 8,
-				left: imgRect.right - wrapperRect.left - 8,
-			})
-		}
-		updatePos()
-		window.addEventListener('scroll', updatePos, true)
-		window.addEventListener('resize', updatePos)
-		const obs = new ResizeObserver(updatePos)
-		if (editorRef.current) obs.observe(editorRef.current)
-		return () => {
-			window.removeEventListener('scroll', updatePos, true)
-			window.removeEventListener('resize', updatePos)
-			obs.disconnect()
-		}
-	}, [selectedMediaPlaceholder, selectedMediaWidth])
+  function handleResizeMouseDown(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    const img = selectedImageEl.current
+    if (!img) return
+    const currentWidth = parseInt(img.style.width) || Math.min(img.naturalWidth || 300, 800)
+    resizeStartPos.current = { x: e.clientX, w: currentWidth, aspect: (img.naturalWidth / img.naturalHeight) || 1 }
+    setIsResizing(true)
+    document.body.style.cursor = 'nwse-resize'
+    document.body.style.userSelect = 'none'
+  }
 
-	function clearSelectedMedia() {
-		selectedImageEl.current = null
-		setHandlePos(null)
-		setSelectedMediaPlaceholder(null)
-		setSelectedMediaWidth(null)
-	}
+  useEffect(() => {
+    if (!isResizing) return
+    function onMouseMove(e) {
+      const img = selectedImageEl.current
+      if (!img) return
+      const dx = e.clientX - resizeStartPos.current.x
+      const newWidth = Math.max(80, Math.min(1200, resizeStartPos.current.w + dx))
+      const newHeight = Math.round(newWidth / resizeStartPos.current.aspect)
+      img.style.width = `${newWidth}px`
+      img.style.height = `${newHeight}px`
+    }
+    function onMouseUp() {
+      setIsResizing(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (selectedImageEl.current && selectedMediaPlaceholder) {
+        const w = parseInt(selectedImageEl.current.style.width)
+        updateSelectedImageWidth(w || 300)
+      }
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [isResizing, selectedMediaPlaceholder, updateSelectedImageWidth])
 
-	function saveCursorPosition() {
-		const sel = window.getSelection()
-		if (sel.rangeCount > 0 && editorRef.current) {
-			const range = sel.getRangeAt(0)
-			if (editorRef.current.contains(range.commonAncestorContainer)) {
-				savedRangeRef.current = range.cloneRange()
-			}
-		}
-	}
+  useEffect(() => {
+    if (!selectedMediaPlaceholder || !selectedImageEl.current) {
+      setHandlePos(null)
+      return
+    }
+    function updatePos() {
+      const img = selectedImageEl.current
+      if (!img || !editorRef.current) return
+      const imgRect = img.getBoundingClientRect()
+      const wrapper = editorRef.current.parentElement
+      if (!wrapper) return
+      const wrapperRect = wrapper.getBoundingClientRect()
+      setHandlePos({
+        top: imgRect.bottom - wrapperRect.top - 8,
+        left: imgRect.right - wrapperRect.left - 8,
+      })
+    }
+    updatePos()
+    window.addEventListener('scroll', updatePos, true)
+    window.addEventListener('resize', updatePos)
+    const obs = new ResizeObserver(updatePos)
+    if (editorRef.current) obs.observe(editorRef.current)
+    return () => {
+      window.removeEventListener('scroll', updatePos, true)
+      window.removeEventListener('resize', updatePos)
+      obs.disconnect()
+    }
+  }, [selectedMediaPlaceholder, selectedMediaWidth])
 
-	function insertHtmlAtCursor(editor, html) {
-		editor.focus()
-		const selection = window.getSelection()
-		let range
-		if (!selection.rangeCount) {
-			if (savedRangeRef.current) {
-				range = savedRangeRef.current.cloneRange()
-				selection.addRange(range)
-			} else {
-				range = document.createRange()
-				range.setStart(editor, 0)
-				range.collapse(true)
-				selection.addRange(range)
-			}
-		} else {
-			range = selection.getRangeAt(0)
-			if (!editor.contains(range.commonAncestorContainer)) {
-				if (savedRangeRef.current) {
-					range = savedRangeRef.current.cloneRange()
-					selection.removeAllRanges()
-					selection.addRange(range)
-				} else {
-					range.selectNodeContents(editor)
-					range.collapse(false)
-				}
-			}
-			range.deleteContents()
-		}
-		const fragment = range.createContextualFragment(html)
-		const lastNode = fragment.lastChild
-		range.insertNode(fragment)
-		if (lastNode) {
-			range.setStartAfter(lastNode)
-			range.collapse(true)
-		}
-		selection.removeAllRanges()
-		selection.addRange(range)
-	}
+  // Track cursor position for injecting media
+  useEffect(() => {
+    function handleSelectionChange() {
+      const sel = window.getSelection()
+      if (sel.rangeCount > 0 && editorRef.current) {
+        const range = sel.getRangeAt(0)
+        if (editorRef.current.contains(range.commonAncestorContainer)) {
+          savedRangeRef.current = range.cloneRange()
+        }
+      }
+    }
+    document.addEventListener('selectionchange', handleSelectionChange)
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange)
+    }
+  }, [])
 
-	async function handleImageUpload(e) {
-		const fileList = e.target.files
-		const files = Array.from(fileList || [])
-		if (files.length === 0 || !editorRef.current) return
-		setError('')
-		setUploading(true)
-		try {
-			for (const file of files) {
-				if (isEdit) {
-					const res = await apiClient.uploadImage(initial.id, file)
-					const placeholder = res.placeholder
-					const pictureUrl = res.image?.picture_url
-					if (placeholder && pictureUrl) {
-						const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${pictureUrl}" style="width:300px; max-width:100%; vertical-align:middle; margin:4px;" />`
-						insertHtmlAtCursor(editorRef.current, imgHtml)
-					}
-				} else {
-					const dataId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-					pendingFilesRef.current[dataId] = file
-					const blobUrl = URL.createObjectURL(file)
-					const imgHtml = `<img class="note-body-image editor-image pending-image" contenteditable="false" data-pending-id="${dataId}" src="${blobUrl}" style="width:300px; max-width:100%; vertical-align:middle; margin:4px;" />`
-					insertHtmlAtCursor(editorRef.current, imgHtml)
-				}
-			}
-			setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
-		} catch (err) {
-			setError('Failed to upload image: ' + err.message)
-		} finally {
-			setUploading(false)
-			e.target.value = ''
-		}
-	}
+  function insertHtmlAtCursor(editor, html) {
+    editor.focus()
+    const selection = window.getSelection()
+    let range
 
-	async function handleVoiceUpload(e) {
- 		const file = e.target.files?.[0]
- 		if (!file || !isEdit) return
- 		setUploading(true)
- 		try {
- 			await apiClient.uploadVoice(initial.id, file)
- 		} catch (err) {
- 			setError('Failed to upload voice: ' + err.message)
- 		} finally {
- 			setUploading(false)
- 		}
- 	}
+    if (savedRangeRef.current) {
+      range = savedRangeRef.current.cloneRange()
+    } else if (selection.rangeCount > 0) {
+      const currentRange = selection.getRangeAt(0)
+      if (editor.contains(currentRange.commonAncestorContainer)) {
+        range = currentRange.cloneRange()
+      }
+    }
 
- 	function startRecordingTimer() {
- 		setRecordingTime(0)
- 		recordingTimerRef.current = setInterval(() => {
- 			setRecordingTime(prev => prev + 1)
- 		}, 1000)
- 	}
+    if (!range) {
+      range = document.createRange()
+      range.selectNodeContents(editor)
+      range.collapse(false) // Position at the end
+    }
 
- 	function stopRecordingTimer() {
- 		if (recordingTimerRef.current) {
- 			clearInterval(recordingTimerRef.current)
- 			recordingTimerRef.current = null
- 		}
- 	}
+    selection.removeAllRanges()
+    selection.addRange(range)
 
- 	async function startVoiceRecording() {
- 		try {
- 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
- 			audioChunksRef.current = []
- 			mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+    // Delete selected text if any
+    range.deleteContents()
 
- 			mediaRecorderRef.current.ondataavailable = (event) => {
- 				if (event.data.size > 0) {
- 					audioChunksRef.current.push(event.data)
- 				}
- 			}
+    const fragment = range.createContextualFragment(html)
+    const lastNode = fragment.lastChild
+    range.insertNode(fragment)
 
- 			mediaRecorderRef.current.onstop = async () => {
- 				stream.getTracks().forEach(track => track.stop())
- 				const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
- 				await uploadVoiceRecording(audioBlob)
- 			}
+    if (lastNode) {
+      range.setStartAfter(lastNode)
+      range.collapse(true)
+    }
 
- 			mediaRecorderRef.current.start()
- 			setIsRecording(true)
- 			startRecordingTimer()
- 		} catch (err) {
- 			setError('Failed to start recording: ' + err.message)
- 		}
- 	}
+    selection.removeAllRanges()
+    selection.addRange(range)
 
- 	function stopVoiceRecording() {
- 		if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
- 			mediaRecorderRef.current.stop()
- 		}
- 		setIsRecording(false)
- 		stopRecordingTimer()
- 	}
+    // Save the range right after insertion so subsequent media inserts sequentially
+    savedRangeRef.current = range.cloneRange()
+  }
 
- 	async function uploadVoiceRecording(audioBlob) {
- 		setUploading(true)
- 		try {
- 			if (isEdit) {
- 				const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
- 				await apiClient.uploadVoice(initial.id, file)
- 			} else {
- 				const pendingId = `pending-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
- 				pendingFilesRef.current[pendingId] = audioBlob
- 				const blobUrl = URL.createObjectURL(audioBlob)
- 				const audioHtml = `<audio class="note-body-audio editor-audio pending-audio" controls data-pending-id="${pendingId}" src="${blobUrl}" style="width:100%; max-width:400px; margin:8px 0;"></audio>`
- 				insertHtmlAtCursor(editorRef.current, audioHtml)
- 				setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
- 			}
- 		} catch (err) {
- 			setError('Failed to upload voice: ' + err.message)
- 		} finally {
- 			setUploading(false)
- 		}
- 	}
+  async function handleImageUpload(e) {
+    const fileList = e.target.files
+    const files = Array.from(fileList || [])
+    if (files.length === 0 || !editorRef.current) return
+    setError('')
+    setUploading(true)
+    const noteId = initial?.id || initial?.note_id
+    try {
+      for (const file of files) {
+        if (isEdit) {
+          const res = await apiClient.uploadImage(noteId, file)
+          const placeholder = res.placeholder
+          const pictureUrl = res.image?.picture_url
+          if (placeholder && pictureUrl) {
+            const imgHtml = `<img class="note-body-image editor-image" contenteditable="false" data-placeholder="${placeholder}" src="${pictureUrl}" style="width:300px; max-width:100%; vertical-align:middle; margin:4px;" />`
+            insertHtmlAtCursor(editorRef.current, imgHtml)
+          }
+        } else {
+          const dataId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          pendingFilesRef.current[dataId] = file
+          const blobUrl = URL.createObjectURL(file)
+          const imgHtml = `<img class="note-body-image editor-image pending-image" contenteditable="false" data-pending-id="${dataId}" src="${blobUrl}" style="width:300px; max-width:100%; vertical-align:middle; margin:4px;" />`
+          insertHtmlAtCursor(editorRef.current, imgHtml)
+        }
+      }
+      setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
+    } catch (err) {
+      setError('Failed to upload image: ' + err.message)
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
 
-	function handleTitleChange(e) {
-		setTitle(e.target.value)
-		if (e.target.getAttribute('dir') !== 'ltr') {
-			e.target.setAttribute('dir', 'ltr')
-		}
-	}
+  async function handleVoiceUpload(e) {
+    const file = e.target.files?.[0]
+    const noteId = initial?.id || initial?.note_id
+    if (!file || !isEdit) return
+    setUploading(true)
+    try {
+      const res = await apiClient.uploadVoice(noteId, file)
+      if (res.placeholder && res.voice?.voice_url && editorRef.current) {
+        const audioHtml = `<audio class="note-body-audio editor-audio" controls contenteditable="false" data-placeholder="${res.placeholder}" src="${res.voice.voice_url}" style="width:100%; max-width:400px; margin:8px 0;"></audio>`
+        insertHtmlAtCursor(editorRef.current, audioHtml)
+        setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
+      }
+    } catch (err) {
+      setError('Failed to upload voice: ' + err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
 
-	async function submit(e) {
-		e.preventDefault()
-		setError('')
+  function startRecordingTimer() {
+    setRecordingTime(0)
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingTime(prev => prev + 1)
+    }, 1000)
+  }
 
-		const trimmedTitle = title.trim()
-		const html = editorRef.current?.innerHTML || ''
-		const bodyText = htmlToBody(html)
+  function stopRecordingTimer() {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+  }
 
-		if (!trimmedTitle || !bodyText) {
-			setError('Title and body are required')
-			return
-		}
+  async function startVoiceRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunksRef.current = []
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' })
 
-		if (bodyText.length > 1000) {
-			setError('Body must be less than 1000 characters')
-			return
-		}
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
 
-		setUploading(true)
-		try {
-			if (isEdit) {
-				await apiClient.updateNote(initial.id, {
-					note_title: trimmedTitle,
-					note_body: bodyText,
-				})
-				onSave({
-					...initial,
-					title: trimmedTitle,
-					body: bodyText,
-				})
-			} else {
- 				const pendingImgs = Array.from(editorRef.current?.querySelectorAll('.pending-image') || [])
- 				const pendingAudios = Array.from(editorRef.current?.querySelectorAll('.pending-audio') || [])
+      mediaRecorderRef.current.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop())
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        await uploadVoiceRecording(audioBlob)
+      }
 
- 				let createBody = bodyText
- 				const createRes = await apiClient.createNote(trimmedTitle, createBody)
+      mediaRecorderRef.current.start()
+      setIsRecording(true)
+      startRecordingTimer()
+    } catch (err) {
+      setError('Failed to start recording: ' + err.message)
+    }
+  }
 
- 				const noteId = createRes.note?.note_id || createRes.note?.id
- 				if (!noteId) throw new Error('Failed to create note')
+  function stopVoiceRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    setIsRecording(false)
+    stopRecordingTimer()
+  }
 
- 				const hasPendingMedia = pendingImgs.length > 0 || pendingAudios.length > 0
+  async function uploadVoiceRecording(audioBlob) {
+    setUploading(true)
+    const noteId = initial?.id || initial?.note_id
+    try {
+      if (isEdit) {
+        const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
+        const res = await apiClient.uploadVoice(noteId, file)
+        if (res.placeholder && res.voice?.voice_url && editorRef.current) {
+          const audioHtml = `<audio class="note-body-audio editor-audio" controls contenteditable="false" data-placeholder="${res.placeholder}" src="${res.voice.voice_url}" style="width:100%; max-width:400px; margin:8px 0;"></audio>`
+          insertHtmlAtCursor(editorRef.current, audioHtml)
+          setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
+        }
+      } else {
+        const pendingId = `pending-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        pendingFilesRef.current[pendingId] = audioBlob
+        const blobUrl = URL.createObjectURL(audioBlob)
+        const audioHtml = `<audio class="note-body-audio editor-audio pending-audio" controls data-pending-id="${pendingId}" src="${blobUrl}" style="width:100%; max-width:400px; margin:8px 0;"></audio>`
+        insertHtmlAtCursor(editorRef.current, audioHtml)
+        setBodyLength(htmlToBody(editorRef.current.innerHTML).length)
+      }
+    } catch (err) {
+      setError('Failed to upload voice: ' + err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
 
- 				if (hasPendingMedia) {
- 					for (const img of pendingImgs) {
- 						const dataId = img.dataset.pendingId
- 						if (!dataId) continue
- 						const file = pendingFilesRef.current[dataId]
- 						if (!file) continue
+  function handleTitleChange(e) {
+    setTitle(e.target.value)
+    if (e.target.getAttribute('dir') !== 'ltr') {
+      e.target.setAttribute('dir', 'ltr')
+    }
+  }
 
- 						const uploadRes = await apiClient.uploadImage(noteId, file)
- 						let ph = uploadRes.placeholder
- 						const picUrl = uploadRes.image?.picture_url
- 						const resizeWidth = img.dataset.resizeWidth
- 						if (resizeWidth) {
- 							const parsed = parsePlaceholderMeta(ph)
- 							if (parsed) {
- 								ph = serializePlaceholder(parsed.type, parsed.index, { width: Number(resizeWidth) })
- 							}
- 						}
- 						if (ph && picUrl) {
- 							URL.revokeObjectURL(img.src)
- 							img.src = picUrl
- 							img.dataset.placeholder = ph
- 							img.style.width = resizeWidth ? `${resizeWidth}px` : ''
- 							img.style.height = ''
- 							img.classList.remove('pending-image')
- 							img.removeAttribute('data-pending-id')
- 							img.removeAttribute('data-resize-width')
- 						}
- 						delete pendingFilesRef.current[dataId]
- 					}
+  async function submit(e) {
+    if (e) e.preventDefault()
+    setError('')
 
- 					for (const audio of pendingAudios) {
- 						const dataId = audio.dataset.pendingId
- 						if (!dataId) continue
- 						const audioBlob = pendingFilesRef.current[dataId]
- 						if (!audioBlob) continue
+    const trimmedTitle = title.trim()
+    const html = editorRef.current?.innerHTML || ''
+    const bodyText = htmlToBody(html)
 
- 						const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
- 						await apiClient.uploadVoice(noteId, file)
- 						URL.revokeObjectURL(audio.src)
- 						audio.classList.remove('pending-audio')
- 						audio.removeAttribute('data-pending-id')
- 						delete pendingFilesRef.current[dataId]
- 					}
+    // If both are empty, don't trigger anything, just cancel
+    if (!trimmedTitle && !bodyText) {
+      onCancel()
+      return
+    }
 
- 					const finalHtml = editorRef.current.innerHTML
- 					const finalBody = htmlToBody(finalHtml)
- 					await apiClient.updateNote(noteId, { note_body: finalBody })
- 					onSave({
- 						...initial,
- 						title: trimmedTitle,
- 						body: finalBody,
- 						id: noteId,
- 					})
- 				} else {
- 					onSave({
- 						...initial,
- 						title: trimmedTitle,
- 						body: createBody,
- 						id: noteId,
- 					})
- 				}
- 			}
-		} catch (err) {
-			setError(err.message || 'Failed to save note')
-		} finally {
-			setUploading(false)
-		}
-	}
+    if (bodyText.length > 1000) {
+      setError('Body must be less than 1000 characters')
+      return
+    }
 
-	return (
-		<div className="modal">
-			<form className="modal-content" onSubmit={submit}>
-				<div className="modal-header">
-					<h3>{isEdit ? 'Edit Note' : 'New Note'}</h3>
-				</div>
-				{error && <div className="modal-error">{error}</div>}
-				<label className="field">
-					Title
-					<input
-						dir="ltr"
-						autoComplete="off"
-						spellCheck="false"
-						placeholder="Give it a short title (min 1 char)"
-						value={title}
-						onChange={handleTitleChange}
-					/>
-					<span className="char-count">{title.length}/100</span>
-				</label>
-				<label className="field">
-					Body
-					<div className="note-body-editor-wrapper" style={{ position: 'relative', margin: 0 }}>
-						<div
-							className="note-body-editor ce-editor modal-editor"
-							ref={editorRef}
-							contentEditable
-							suppressContentEditableWarning
-							dir="ltr"
-							onInput={handleEditorInput}
-							onClick={handleEditorClick}
-							onMouseUp={saveCursorPosition}
-							onKeyUp={saveCursorPosition}
-						/>
-						{handlePos && !isResizing && (
-							<div
-								className="image-resize-handle"
-								style={{ top: handlePos.top, left: handlePos.left }}
-								onMouseDown={handleResizeMouseDown}
-							/>
-						)}
-						{isResizing && (
-							<div className="image-resize-overlay" />
-						)}
-					</div>
-					<span className="char-count">{bodyLength}/1000</span>
-				</label>
+    setUploading(true)
+    const noteId = initial?.id || initial?.note_id
+    try {
+      if (isEdit) {
+        await apiClient.updateNote(noteId, {
+          note_title: trimmedTitle,
+          note_body: bodyText,
+        })
+        onSave({
+          ...initial,
+          title: trimmedTitle,
+          body: bodyText,
+          note_title: trimmedTitle,
+          note_body: bodyText,
+        })
+      } else {
+        const pendingImgs = Array.from(editorRef.current?.querySelectorAll('.pending-image') || [])
+        const pendingAudios = Array.from(editorRef.current?.querySelectorAll('.pending-audio') || [])
 
-				<div className="media-section">
- 					<div className="media-upload">
- 						<label className="btn secondary" onMouseDown={saveCursorPosition}>
- 							📷 Add Image
- 							<input
- 								type="file"
- 								accept="image/*"
- 								onChange={handleImageUpload}
- 								disabled={uploading}
- 								style={{ display: 'none' }}
- 								multiple={true}
- 							/>
- 						</label>
- 						{isEdit && (
- 							<label className="btn secondary">
- 								🎙️ Add Voice
- 								<input
- 									type="file"
- 									accept="audio/*"
- 									onChange={handleVoiceUpload}
- 									disabled={uploading}
- 									style={{ display: 'none' }}
- 								/>
- 							</label>
- 						)}
- 						<button
- 							type="button"
- 							className={`btn secondary ${isRecording ? 'recording' : ''}`}
- 							onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
- 							disabled={uploading}
- 							onMouseDown={saveCursorPosition}
- 						>
- 							{isRecording ? (
- 								<>
- 									⏹️ Stop Recording
- 									<span className="recording-time"> ({formatTime(recordingTime)})</span>
- 									<span className="recording-indicator" />
- 								</>
- 							) : (
- 								'🎙️ Record Voice'
- 							)}
- 						</button>
- 					</div>
- 				</div>
+        let createBody = bodyText
+        const createRes = await apiClient.createNote(trimmedTitle, createBody)
 
-				<div className="modal-actions">
-					<button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
-					<button type="submit" className="btn primary" disabled={uploading}>
-						{uploading ? 'Saving...' : 'Save'}
-					</button>
-				</div>
-			</form>
-		</div>
-	)
+        const createdNoteId = createRes.note?.note_id || createRes.note?.id
+        if (!createdNoteId) throw new Error('Failed to create note')
+
+        const hasPendingMedia = pendingImgs.length > 0 || pendingAudios.length > 0
+
+        if (hasPendingMedia) {
+          for (const img of pendingImgs) {
+            const dataId = img.dataset.pendingId
+            if (!dataId) continue
+            const file = pendingFilesRef.current[dataId]
+            if (!file) continue
+
+            const uploadRes = await apiClient.uploadImage(createdNoteId, file)
+            let ph = uploadRes.placeholder
+            const picUrl = uploadRes.image?.picture_url
+            const resizeWidth = img.dataset.resizeWidth
+            if (resizeWidth) {
+              const parsed = parsePlaceholderMeta(ph)
+              if (parsed) {
+                ph = serializePlaceholder(parsed.type, parsed.index, { width: Number(resizeWidth) })
+              }
+            }
+            if (ph && picUrl) {
+              URL.revokeObjectURL(img.src)
+              img.src = picUrl
+              img.dataset.placeholder = ph
+              img.style.width = resizeWidth ? `${resizeWidth}px` : ''
+              img.style.height = ''
+              img.classList.remove('pending-image')
+              img.removeAttribute('data-pending-id')
+              img.removeAttribute('data-resize-width')
+            }
+            delete pendingFilesRef.current[dataId]
+          }
+
+          for (const audio of pendingAudios) {
+            const dataId = audio.dataset.pendingId
+            if (!dataId) continue
+            const audioBlob = pendingFilesRef.current[dataId]
+            if (!audioBlob) continue
+
+            const file = new File([audioBlob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
+            const uploadRes = await apiClient.uploadVoice(createdNoteId, file)
+            if (uploadRes.placeholder) {
+              audio.dataset.placeholder = uploadRes.placeholder
+            }
+            URL.revokeObjectURL(audio.src)
+            audio.classList.remove('pending-audio')
+            audio.removeAttribute('data-pending-id')
+            delete pendingFilesRef.current[dataId]
+          }
+
+          const finalHtml = editorRef.current.innerHTML
+          const finalBody = htmlToBody(finalHtml)
+          await apiClient.updateNote(createdNoteId, { note_body: finalBody })
+          onSave({
+            ...initial,
+            title: trimmedTitle,
+            body: finalBody,
+            note_title: trimmedTitle,
+            note_body: finalBody,
+            id: createdNoteId,
+            note_id: createdNoteId,
+          })
+        } else {
+          onSave({
+            ...initial,
+            title: trimmedTitle,
+            body: createBody,
+            note_title: trimmedTitle,
+            note_body: createBody,
+            id: createdNoteId,
+            note_id: createdNoteId,
+          })
+        }
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to save note')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="modal" onClick={handleBackdropClick} role="dialog" aria-modal="true">
+      <form ref={contentRef} className="modal-content" onSubmit={submit}>
+        {error && <div className="modal-error">{error}</div>}
+
+        {/* Borderless and label-less Title Input */}
+        <div className="field" style={{ marginBottom: '8px' }}>
+          <input
+            dir="ltr"
+            autoComplete="off"
+            spellCheck="false"
+            placeholder="Title"
+            value={title}
+            onChange={handleTitleChange}
+            style={{ fontSize: '18px', fontWeight: '600' }}
+          />
+        </div>
+
+        {/* Contenteditable Body Editor */}
+        <div className="note-body-editor-wrapper" style={{ margin: 0 }}>
+          <div
+            className="note-body-editor ce-editor modal-editor"
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            dir="ltr"
+            data-placeholder="Note"
+            onInput={handleEditorInput}
+            onClick={handleEditorClick}
+            style={{ minHeight: '100px', border: 'none', padding: 0 }}
+          />
+          {handlePos && !isResizing && (
+            <div
+              className="image-resize-handle"
+              style={{ top: handlePos.top, left: handlePos.left }}
+              onMouseDown={handleResizeMouseDown}
+            />
+          )}
+          {isResizing && (
+            <div className="image-resize-overlay" />
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="char-count" style={{ alignSelf: 'center', marginTop: 0 }}>{bodyLength}/1000</span>
+        </div>
+
+        {/* Clean Google Keep Footer Actions */}
+        <div className="media-section">
+          <div className="media-upload">
+            {/* SVG Image Upload Button */}
+            <label className="card-icon-btn" title="Add Image">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                disabled={uploading}
+                style={{ display: 'none' }}
+                multiple
+              />
+            </label>
+
+            {/* SVG Voice File Upload Button (only if editing an existing note) */}
+            {isEdit && (
+              <label className="card-icon-btn" title="Upload Voice File">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleVoiceUpload}
+                  disabled={uploading}
+                  style={{ display: 'none' }}
+                />
+              </label>
+            )}
+
+            {/* SVG Voice Recording Button */}
+            <button
+              type="button"
+              className={`card-icon-btn ${isRecording ? 'recording' : ''}`}
+              onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+              disabled={uploading}
+              title={isRecording ? "Stop Recording" : "Record Voice"}
+            >
+              {isRecording ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#fff' }}>
+                  <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+              )}
+            </button>
+            {isRecording && (
+              <span style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 'bold' }}>
+                {formatTime(recordingTime)}
+              </span>
+            )}
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="btn ghost" onClick={onCancel} style={{ fontWeight: '500' }}>Cancel</button>
+            <button type="submit" className="note-creator-btn-close" disabled={uploading} style={{ fontWeight: '600' }}>
+              {uploading ? 'Saving...' : 'Close'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  )
 }
