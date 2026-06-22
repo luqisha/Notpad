@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from backend.app.schemas.note import Note
-from backend.app.schemas.user import User
-from backend.app.schemas.media import Voice, Picture
-from backend.app.utils.storage import read_file, write_file
+from app.schemas.note import Note
+from app.schemas.user import User
+from app.schemas.media import Voice, Picture
+from app.utils.storage import read_file, write_file
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
@@ -54,7 +54,7 @@ def save_notes(notes: list[Note]) -> None:
 
 
 def load_groups() -> list["Group"]:
-    from backend.app.schemas.group import Group  # local import to avoid circular
+    from app.schemas.group import Group  # local import to avoid circular
 
     return [Group.model_validate(group) for group in read_file(_GROUPS_FILE)]
 
@@ -80,7 +80,7 @@ def save_pictures(pictures: list[Picture]) -> None:
 
 
 def load_group_notes_list() -> list["GroupNotesItem"]:
-    from backend.app.schemas.group import GroupNotesItem
+    from app.schemas.group import GroupNotesItem
 
     return [GroupNotesItem.model_validate(item) for item in read_file(_GROUP_NOTES_LIST_FILE)]
 
