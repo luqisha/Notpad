@@ -8,11 +8,11 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from app.utils.data_loader import init_data_files
+from app.utils.data_loader import init_db
 from app.routes import notes, auth, group
 from app.core.config import settings
 
-init_data_files()
+init_db()
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 

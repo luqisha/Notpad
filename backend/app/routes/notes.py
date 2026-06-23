@@ -11,19 +11,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.utils.data_loader import (
-    load_notes,
-    load_users,
-    save_notes,
-    load_voices,
-    load_pictures,
-    save_voices,
-    save_pictures,
-    _find_user_by_id,
-    _find_note_by_id,
-    _find_voice_by_id,
-    _find_picture_by_id,
-)
+import app.utils.data_loader as dl
+from app.utils.database import DBUser, DBNote, DBPicture, DBVoice
 from app.utils.dependencies import require_user_id, verify_api_key
 from app.schemas.media import Picture, Voice
 from app.schemas.note import Note, NoteCreate, NoteUpdate, MediaReference
@@ -148,20 +137,17 @@ def create_note_with_images(
     user_id: str = Depends(require_user_id),
 ):
 
-    users = load_users()
-    if not _find_user_by_id(users, user_id):
+    if not dl.get_record(DBUser, user_id=user_id):
         raise HTTPException(status_code=404, detail="User not found")
 
-    notes = load_notes()
-    image_references: list[MediaReference] = []
-    image_body = note_body
-    pictures = load_pictures()
-
-    # Convert string to boolean
     is_pinned_bool = is_pinned.lower() in ("true", "1", "yes")
 
-    note = Note(
-        note_id=str(uuid.uuid4()),
+    note_id = str(uuid.uuid4())
+    image_body = note_body
+    image_references: list[MediaReference] = []
+
+    temp_note = Note(
+        note_id=note_id,
         user_id=user_id,
         note_title=note_title,
         note_body=note_body,
@@ -175,25 +161,34 @@ def create_note_with_images(
         for file in images:
             filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_SIZE)
             image_url = _make_upload_url(request, f"images/{filename}")
-            picture = Picture(
-                picture_id=str(uuid.uuid4()),
-                note_id=note.note_id,
+            
+            next_index = _get_next_image_index(temp_note)
+            picture_id = str(uuid.uuid4())
+            
+            dl.create_record(
+                DBPicture,
+                picture_id=picture_id,
+                note_id=note_id,
                 user_id=user_id,
                 picture_url=image_url,
                 file_hash=file_hash,
+                index=next_index
             )
-            pictures.append(picture)
 
-            next_index = _get_next_image_index(note)
             placeholder = _make_media_placeholder("image", next_index)
             image_body = f"{image_body} {placeholder}".strip()
-            image_references.append(MediaReference(index=next_index, id=picture.picture_id))
-            note = note.model_copy(update={"note_body": image_body, "images": image_references})
+            image_references.append(MediaReference(index=next_index, id=picture_id))
+            temp_note = temp_note.model_copy(update={"note_body": image_body, "images": image_references})
 
-        save_pictures(pictures)
-
-    notes.append(note)
-    save_notes(notes)
+    note = dl.create_record(
+        DBNote,
+        note_id=note_id,
+        user_id=user_id,
+        note_title=note_title,
+        note_body=image_body,
+        bg_color=bg_color,
+        is_pinned=is_pinned_bool
+    )
     return {"message": "Note created successfully", "note": note}
 
 
@@ -201,61 +196,31 @@ def create_note_with_images(
 @limiter.limit("60/minute")
 def create_note(request: Request, note: NoteCreate, user_id: str = Depends(require_user_id)):
 
-    users = load_users()
-    if not _find_user_by_id(users, user_id):
+    if not dl.get_record(DBUser, user_id=user_id):
         raise HTTPException(status_code=404, detail="User not found")
 
-    notes = load_notes()
-    note = Note(
+    note_obj = dl.create_record(
+        DBNote,
         note_id=str(uuid.uuid4()),
         user_id=user_id,
-        **note.model_dump(),
+        note_title=note.note_title,
+        note_body=note.note_body,
+        bg_color=note.bg_color,
+        is_pinned=note.is_pinned
     )
-
-    notes.append(note)
-    save_notes(notes)
-    return {"message": "Note created successfully", "note": note}
+    return {"message": "Note created successfully", "note": note_obj}
 
 
 @router.get("")
 @limiter.limit("120/minute")
 def get_notes(request: Request, skip: int = 0, limit: int = 12, query: Optional[str] = None, user_id: str = Depends(require_user_id)):
 
-    # Validate pagination parameters
     if skip < 0:
         skip = 0
     if limit < 1 or limit > 100:
         limit = 12
 
-    
-    # Filter notes for current user only
-    normalized_query = None
-    if query:
-        normalized_query = query.strip().lower()
-    
-    # Load fresh notes from file
-    notes = load_notes()
-    
-    # Single pass: filter user notes and search, collect only what we need
-    user_notes = []
-    total = 0
-    
-    for note in notes:
-        if note.user_id != user_id:
-            continue
-        
-        # Apply search filter if provided
-        if normalized_query and normalized_query not in (note.note_title or "").lower():
-            continue
-        
-        total += 1
-        
-        # Collect only the notes needed for this page
-        if total > skip and len(user_notes) < limit:
-            user_notes.append(note)
-
-    # Calculate pagination
-    paginated_notes = user_notes
+    paginated_notes, total = dl.get_records(DBNote, order_by=DBNote.note_id, skip=skip, limit=limit, query_attr="note_title", query=query, user_id=user_id)
 
     return {
         "message": "Notes retrieved successfully",
@@ -296,8 +261,7 @@ def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str =
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    notes = load_notes()
-    existing = _find_note_by_id(notes, user_id, note_id)
+    existing = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Note not found")
 
@@ -309,44 +273,38 @@ def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str =
     orphaned_image_refs = [ref for idx, ref in current_image_refs.items() if idx not in referenced_image_indices]
 
     if orphaned_image_refs:
-        pictures = load_pictures()
         for ref in orphaned_image_refs:
-            picture = _find_picture_by_id(pictures, user_id, ref.id)
+            picture = dl.get_record(DBPicture, picture_id=ref.id, user_id=user_id)
             if picture:
                 picture_path = urlparse(picture.picture_url).path
                 image_file = IMAGE_UPLOAD_DIR / Path(picture_path).name
                 image_file.unlink(missing_ok=True)
-                pictures = [p for p in pictures if p.picture_id != ref.id]
-        save_pictures(pictures)
-
-    updated_images = [ref for ref in existing.images if ref.index in referenced_image_indices]
+                dl.delete_record(DBPicture, picture_id=ref.id, user_id=user_id)
 
     current_voice_refs = {ref.index: ref for ref in existing.voices}
     orphaned_voice_refs = [ref for idx, ref in current_voice_refs.items() if idx not in referenced_voice_indices]
 
     if orphaned_voice_refs:
-        voices = load_voices()
         for ref in orphaned_voice_refs:
-            voice = _find_voice_by_id(voices, user_id, ref.id)
+            voice = dl.get_record(DBVoice, voice_id=ref.id, user_id=user_id)
             if voice:
                 voice_path = urlparse(voice.voice_url).path
                 voice_file = VOICE_UPLOAD_DIR / Path(voice_path).name
                 voice_file.unlink(missing_ok=True)
-                voices = [v for v in voices if v.voice_id != ref.id]
-        save_voices(voices)
+                dl.delete_record(DBVoice, voice_id=ref.id, user_id=user_id)
 
-    updated_voices = [ref for ref in existing.voices if ref.index in referenced_voice_indices]
-
-    final_updates = {**updates, "images": updated_images, "voices": updated_voices}
-
-    for index, stored in enumerate(notes):
-        if stored.note_id != note_id:
-            continue
-        notes[index] = stored.model_copy(update=final_updates)
-        break
-
-    save_notes(notes)
-    updated = _find_note_by_id(notes, user_id, note_id)
+    updated = dl.update_record(
+        DBNote,
+        filter_kwargs={"note_id": note_id, "user_id": user_id},
+        update_kwargs={
+            "note_title": updates.get("note_title"),
+            "note_body": updates.get("note_body"),
+            "bg_color": updates.get("bg_color"),
+            "is_pinned": updates.get("is_pinned")
+        },
+        raise_if_missing=True,
+        missing_detail="Note not found"
+    )
     return {"message": "Note updated successfully", "note": updated}
 
 
@@ -354,13 +312,11 @@ def update_note(request: Request, note_id: str, note: NoteUpdate, user_id: str =
 @limiter.limit("60/minute")
 def delete_note(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
 
-    notes = load_notes()
-    note = _find_note_by_id(notes, user_id, note_id)
+    note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    notes = [stored for stored in notes if stored.note_id != note_id]
-    save_notes(notes)
+    dl.delete_record(DBNote, note_id=note_id, user_id=user_id)
     return {"message": "Note deleted successfully", "note": note}
 
 
@@ -369,28 +325,18 @@ def delete_note(request: Request, note_id: str, user_id: str = Depends(require_u
 def upload_note_image(request: Request, note_id: str, file: UploadFile = File(...), user_id: str = Depends(require_user_id)):
     """Upload an image and return a placeholder token for the note body."""
 
-    notes = load_notes()
-    note = _find_note_by_id(notes, user_id, note_id)
+    note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
     filename, file_hash = _save_upload_file(file, IMAGE_UPLOAD_DIR, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_SIZE)
     image_url = _make_upload_url(request, f"images/{filename}")
 
-    pictures = load_pictures()
-
-    # Check for duplicate image in the same note by file hash
-    existing = None
-    for pic in pictures:
-        if pic.note_id == note_id and pic.file_hash == file_hash:
-            existing = pic
-            # Remove the just-saved duplicate file
-            (IMAGE_UPLOAD_DIR / filename).unlink(missing_ok=True)
-            break
+    existing = dl.get_record(DBPicture, note_id=note_id, file_hash=file_hash)
 
     if existing:
         picture = existing
-        # Find the existing index from note references
+        (IMAGE_UPLOAD_DIR / filename).unlink(missing_ok=True)
         next_index = None
         for ref in note.images:
             if ref.id == picture.picture_id:
@@ -399,46 +345,27 @@ def upload_note_image(request: Request, note_id: str, file: UploadFile = File(..
         if next_index is None:
             next_index = _get_next_image_index(note)
     else:
-        picture = Picture(
+        next_index = _get_next_image_index(note)
+        picture = dl.create_record(
+            DBPicture,
             picture_id=str(uuid.uuid4()),
             note_id=note_id,
             user_id=user_id,
             picture_url=image_url,
             file_hash=file_hash,
+            index=next_index
         )
-        pictures.append(picture)
-        save_pictures(pictures)
-
-        next_index = _get_next_image_index(note)
         placeholder = _make_media_placeholder("image", next_index)
-
-        # Update note with new image reference and placeholder
-        for idx, stored in enumerate(notes):
-            if stored.note_id != note_id:
-                continue
-            new_body = f"{stored.note_body} {placeholder}" if stored.note_body else placeholder
-            new_images = stored.images + [MediaReference(index=next_index, id=picture.picture_id)]
-            notes[idx] = stored.model_copy(update={
-                "note_body": new_body,
-                "images": new_images
-            })
-            updated_note = notes[idx]
-            break
-        save_notes(notes)
-
-        return {
-            "message": "Image uploaded successfully",
-            "image": picture,
-            "placeholder": placeholder,
-            "note": updated_note,
-        }
+        new_body = f"{note.note_body} {placeholder}" if note.note_body else placeholder
+        dl.update_record(DBNote, filter_kwargs={"note_id": note_id, "user_id": user_id}, update_kwargs={"note_body": new_body})
 
     placeholder = _make_media_placeholder("image", next_index)
+    updated_note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     return {
-        "message": "Image already exists in this note",
+        "message": "Image uploaded successfully" if not existing else "Image already exists in this note",
         "image": picture,
         "placeholder": placeholder,
-        "note": note,
+        "note": updated_note,
     }
 
 
@@ -447,42 +374,28 @@ def upload_note_image(request: Request, note_id: str, file: UploadFile = File(..
 def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(...), user_id: str = Depends(require_user_id)):
     """Upload a voice file and return a placeholder token for the note body."""
 
-    notes = load_notes()
-    note = _find_note_by_id(notes, user_id, note_id)
+    note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
     filename, _ = _save_upload_file(file, VOICE_UPLOAD_DIR, ALLOWED_VOICE_MIME_TYPES, MAX_VOICE_SIZE)
     voice_url = _make_upload_url(request, f"voices/{filename}")
-    voice = Voice(
+
+    next_index = _get_next_voice_index(note)
+    voice = dl.create_record(
+        DBVoice,
         voice_id=str(uuid.uuid4()),
         note_id=note_id,
         user_id=user_id,
         voice_url=voice_url,
+        index=next_index
     )
 
-    voices = load_voices()
-    voices.append(voice)
-    save_voices(voices)
-
-    # Get next voice index for this note
-    next_index = _get_next_voice_index(note)
     placeholder = _make_media_placeholder("audio", next_index)
-    
-    # Update note with new voice reference and placeholder
-    for idx, stored in enumerate(notes):
-        if stored.note_id != note_id:
-            continue
-        new_body = f"{stored.note_body} {placeholder}" if stored.note_body else placeholder
-        new_voices = stored.voices + [MediaReference(index=next_index, id=voice.voice_id)]
-        notes[idx] = stored.model_copy(update={
-            "note_body": new_body,
-            "voices": new_voices
-        })
-        updated_note = notes[idx]
-        break
-    save_notes(notes)
+    new_body = f"{note.note_body} {placeholder}" if note.note_body else placeholder
+    dl.update_record(DBNote, filter_kwargs={"note_id": note_id, "user_id": user_id}, update_kwargs={"note_body": new_body})
 
+    updated_note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     return {
         "message": "Voice uploaded successfully",
         "voice": voice,
@@ -495,30 +408,21 @@ def upload_note_voice(request: Request, note_id: str, file: UploadFile = File(..
 @limiter.limit("120/minute")
 def get_note_voices(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
     """Get all voices for a specific note."""
-
-    notes = load_notes()
-    if not _find_note_by_id(notes, user_id, note_id):
+    if not dl.get_record(DBNote, note_id=note_id, user_id=user_id):
         raise HTTPException(status_code=404, detail="Note not found")
-
-    voices = load_voices()
-    note_voices = [voice for voice in voices if voice.note_id == note_id and voice.user_id == user_id]
-    return {"message": "Voices retrieved successfully", "voices": note_voices}
+    voices, _ = dl.get_records(DBVoice, order_by=DBVoice.index, note_id=note_id, user_id=user_id)
+    return {"message": "Voices retrieved successfully", "voices": voices}
 
 
 @router.get("/{note_id}/voices/{voice_id}")
 @limiter.limit("120/minute")
 def get_note_voice(request: Request, note_id: str, voice_id: str, user_id: str = Depends(require_user_id)):
     """Get a specific voice from a note."""
-
-    notes = load_notes()
-    if not _find_note_by_id(notes, user_id, note_id):
+    if not dl.get_record(DBNote, note_id=note_id, user_id=user_id):
         raise HTTPException(status_code=404, detail="Note not found")
-
-    voices = load_voices()
-    voice = _find_voice_by_id(voices, user_id, voice_id)
+    voice = dl.get_record(DBVoice, voice_id=voice_id, user_id=user_id)
     if not voice or voice.note_id != note_id:
         raise HTTPException(status_code=404, detail="Voice not found")
-
     return {"message": "Voice retrieved successfully", "voice": voice}
 
 
@@ -526,30 +430,21 @@ def get_note_voice(request: Request, note_id: str, voice_id: str, user_id: str =
 @limiter.limit("120/minute")
 def get_note_images(request: Request, note_id: str, user_id: str = Depends(require_user_id)):
     """Get all images for a specific note."""
-
-    notes = load_notes()
-    if not _find_note_by_id(notes, user_id, note_id):
+    if not dl.get_record(DBNote, note_id=note_id, user_id=user_id):
         raise HTTPException(status_code=404, detail="Note not found")
-
-    pictures = load_pictures()
-    note_pictures = [picture for picture in pictures if picture.note_id == note_id and picture.user_id == user_id]
-    return {"message": "Images retrieved successfully", "images": note_pictures}
+    pics, _ = dl.get_records(DBPicture, order_by=DBPicture.index, note_id=note_id, user_id=user_id)
+    return {"message": "Images retrieved successfully", "images": pics}
 
 
 @router.get("/{note_id}/images/{image_id}")
 @limiter.limit("120/minute")
 def get_note_image(request: Request, note_id: str, image_id: str, user_id: str = Depends(require_user_id)):
     """Get a specific image from a note."""
-
-    notes = load_notes()
-    if not _find_note_by_id(notes, user_id, note_id):
+    if not dl.get_record(DBNote, note_id=note_id, user_id=user_id):
         raise HTTPException(status_code=404, detail="Note not found")
-
-    pictures = load_pictures()
-    picture = _find_picture_by_id(pictures, user_id, image_id)
+    picture = dl.get_record(DBPicture, picture_id=image_id, user_id=user_id)
     if not picture or picture.note_id != note_id:
         raise HTTPException(status_code=404, detail="Image not found")
-
     return {"message": "Image retrieved successfully", "image": picture}
 
 
@@ -557,50 +452,32 @@ def get_note_image(request: Request, note_id: str, image_id: str, user_id: str =
 @limiter.limit("60/minute")
 def delete_note_image(request: Request, note_id: str, image_id: str, user_id: str = Depends(require_user_id)):
     """Delete an image from a note."""
-
-    notes = load_notes()
-    note = _find_note_by_id(notes, user_id, note_id)
+    note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    pictures = load_pictures()
-    picture = _find_picture_by_id(pictures, user_id, image_id)
+    picture = dl.get_record(DBPicture, picture_id=image_id, user_id=user_id)
     if not picture or picture.note_id != note_id:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    # Remove the file from disk
     picture_path = urlparse(picture.picture_url).path
     image_file = IMAGE_UPLOAD_DIR / Path(picture_path).name
     image_file.unlink(missing_ok=True)
 
-    # Remove picture record
-    pictures = [p for p in pictures if p.picture_id != image_id]
-    save_pictures(pictures)
+    dl.delete_record(DBPicture, picture_id=image_id, user_id=user_id)
 
-    # Find the image index from note references and remove it
     removed_index = None
     for ref in note.images:
         if ref.id == image_id:
             removed_index = ref.index
             break
 
-    # Update note: remove image reference and placeholder from body
-    new_images = [ref for ref in note.images if ref.id != image_id]
     new_body = note.note_body
     if removed_index is not None:
         new_body = re.sub(rf'\[IMG:{removed_index}[^\]]*\]\s*', '', new_body).strip()
 
-    for idx, stored in enumerate(notes):
-        if stored.note_id != note_id:
-            continue
-        notes[idx] = stored.model_copy(update={
-            "note_body": new_body,
-            "images": new_images,
-        })
-        updated_note = notes[idx]
-        break
-    save_notes(notes)
-
+    dl.update_record(DBNote, filter_kwargs={"note_id": note_id, "user_id": user_id}, update_kwargs={"note_body": new_body})
+    updated_note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     return {"message": "Image deleted successfully", "note": updated_note}
 
 
@@ -608,48 +485,30 @@ def delete_note_image(request: Request, note_id: str, image_id: str, user_id: st
 @limiter.limit("60/minute")
 def delete_note_voice(request: Request, note_id: str, voice_id: str, user_id: str = Depends(require_user_id)):
     """Delete a voice from a note."""
-
-    notes = load_notes()
-    note = _find_note_by_id(notes, user_id, note_id)
+    note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    voices = load_voices()
-    voice = _find_voice_by_id(voices, user_id, voice_id)
+    voice = dl.get_record(DBVoice, voice_id=voice_id, user_id=user_id)
     if not voice or voice.note_id != note_id:
         raise HTTPException(status_code=404, detail="Voice not found")
 
-    # Remove the file from disk
     voice_path = urlparse(voice.voice_url).path
     voice_file = VOICE_UPLOAD_DIR / Path(voice_path).name
     voice_file.unlink(missing_ok=True)
 
-    # Remove voice record
-    voices = [v for v in voices if v.voice_id != voice_id]
-    save_voices(voices)
+    dl.delete_record(DBVoice, voice_id=voice_id, user_id=user_id)
 
-    # Find the voice index from note references and remove it
     removed_index = None
     for ref in note.voices:
         if ref.id == voice_id:
             removed_index = ref.index
             break
 
-    # Update note: remove voice reference and placeholder from body
-    new_voices = [ref for ref in note.voices if ref.id != voice_id]
     new_body = note.note_body
     if removed_index is not None:
         new_body = re.sub(rf'\[AUD:{removed_index}[^\]]*\]\s*', '', new_body).strip()
 
-    for idx, stored in enumerate(notes):
-        if stored.note_id != note_id:
-            continue
-        notes[idx] = stored.model_copy(update={
-            "note_body": new_body,
-            "voices": new_voices,
-        })
-        updated_note = notes[idx]
-        break
-    save_notes(notes)
-
+    dl.update_record(DBNote, filter_kwargs={"note_id": note_id, "user_id": user_id}, update_kwargs={"note_body": new_body})
+    updated_note = dl.get_record(DBNote, note_id=note_id, user_id=user_id)
     return {"message": "Voice deleted successfully", "note": updated_note}
