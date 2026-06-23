@@ -6,20 +6,14 @@ from typing import Optional
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.utils.data_loader import load_users, save_users
-from app.schemas.user import User, UserCreate
+from app.utils.data_loader import get_record, create_record
+from app.utils.database import DBUser
+from app.schemas.user import UserCreate
 from app.utils.dependencies import verify_api_key
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 limiter = Limiter(key_func=get_remote_address)
-
-
-def _find_user_by_mail(users: list[User], email: str) -> Optional[User]:
-    for user in users:
-        if user.user_mail == email:
-            return user
-    return None
 
 
 def _hash_password(password: str) -> str:
@@ -32,27 +26,22 @@ def _verify_password(password: str, hashed: str) -> bool:
 
 @router.post("/register")
 def register(credentials: UserCreate):
-    users = load_users()
-
-    if _find_user_by_mail(users, credentials.user_mail):
+    if get_record(DBUser, user_mail=credentials.user_mail):
         raise HTTPException(status_code=409, detail="User already exists")
 
-    users.append(
-        User(
-            user_id=str(uuid.uuid4()),
-            user_mail=credentials.user_mail,
-            user_pass=_hash_password(credentials.password),
-        )
+    create_record(
+        DBUser,
+        user_id=str(uuid.uuid4()),
+        user_mail=credentials.user_mail,
+        user_pass=_hash_password(credentials.password),
     )
-    save_users(users)
     return {"message": "User registered successfully"}
 
 
 @router.post("/login")
 @limiter.limit("30/minute")
 def login(request: Request, credentials: UserCreate):
-    users = load_users()
-    user = _find_user_by_mail(users, credentials.user_mail)
+    user = get_record(DBUser, user_mail=credentials.user_mail)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 

@@ -1,139 +1,157 @@
-from pathlib import Path
-from typing import Optional
-
+from contextlib import contextmanager
+from typing import Optional, Any, Type, Tuple, List
 from fastapi import HTTPException
-from pydantic import ValidationError
 
-from app.schemas.note import Note
+from app.schemas.note import Note, MediaReference
 from app.schemas.user import User
-from app.schemas.group import Group
 from app.schemas.media import Voice, Picture
-from app.utils.storage import read_file, write_file
-
-_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
-_IMAGE_UPLOAD_DIR = _UPLOADS_DIR / "images"
-_VOICE_UPLOAD_DIR = _UPLOADS_DIR / "voices"
-_USERS_FILE = _DATA_DIR / "user.json"
-_NOTES_FILE = _DATA_DIR / "note.json"
-_GROUPS_FILE = _DATA_DIR / "group.json"
-_GROUP_NOTES_LIST_FILE = _DATA_DIR / "group_notes_list.json"
-_VOICES_FILE = _DATA_DIR / "note_voice.json"
-_PICTURES_FILE = _DATA_DIR / "note_pictures.json"
-_DATA_FILES = [
-    "user.json",
-    "note.json",
-    "group.json",
-    "group_notes_list.json",
-    "note_voice.json",
-    "note_pictures.json",
-]
+from app.utils.database import SessionLocal, DBUser, DBNote, DBGroup, DBPicture, DBVoice
 
 
-def init_data_files() -> None:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _IMAGE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    _VOICE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    for filename in _DATA_FILES:
-        path = _DATA_DIR / filename
-        if not path.exists():
-            write_file(path, [])
+@contextmanager
+def db_session():
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
-def load_users() -> list[User]:
-    return [User.model_validate(user) for user in read_file(_USERS_FILE)]
+def init_db() -> None:
+    from app.utils.database import Base, engine
+    Base.metadata.create_all(bind=engine)
 
 
-def save_users(users: list[User]) -> None:
-    write_file(_USERS_FILE, [user.model_dump() for user in users])
+def _to_schema(db_obj: Any) -> Any:
+    if not db_obj:
+        return None
+    if isinstance(db_obj, DBUser):
+        return User(
+            user_id=db_obj.user_id,
+            user_mail=db_obj.user_mail,
+            user_pass=db_obj.user_pass
+        )
+    elif isinstance(db_obj, DBNote):
+        images = sorted(db_obj.images, key=lambda x: x.index)
+        voices = sorted(db_obj.voices, key=lambda x: x.index)
+        return Note(
+            note_id=db_obj.note_id,
+            user_id=db_obj.user_id,
+            note_title=db_obj.note_title,
+            note_body=db_obj.note_body,
+            bg_color=db_obj.bg_color,
+            is_pinned=db_obj.is_pinned,
+            images=[MediaReference(index=img.index, id=img.picture_id) for img in images],
+            voices=[MediaReference(index=v.index, id=v.voice_id) for v in voices]
+        )
+    elif isinstance(db_obj, DBPicture):
+        return Picture(
+            picture_id=db_obj.picture_id,
+            note_id=db_obj.note_id,
+            user_id=db_obj.user_id,
+            picture_url=db_obj.picture_url,
+            file_hash=db_obj.file_hash
+        )
+    elif isinstance(db_obj, DBVoice):
+        return Voice(
+            voice_id=db_obj.voice_id,
+            note_id=db_obj.note_id,
+            user_id=db_obj.user_id,
+            voice_url=db_obj.voice_url
+        )
+    elif isinstance(db_obj, DBGroup):
+        return {
+            "group_id": db_obj.group_id,
+            "user_id": db_obj.user_id,
+            "name": db_obj.name,
+            "description": db_obj.description,
+            "note_ids": [n.note_id for n in db_obj.notes]
+        }
+    return db_obj
 
 
-def load_notes() -> list[Note]:
-    return [Note.model_validate(note) for note in read_file(_NOTES_FILE)]
+def get_record(model: Type[Any], **kwargs: Any) -> Any:
+    with db_session() as db:
+        db_obj = db.query(model).filter_by(**kwargs).first()
+        return _to_schema(db_obj)
 
 
+def get_records(
+    model: Type[Any],
+    order_by: Any = None,
+    skip: int = 0,
+    limit: int = 0,
+    query_attr: Optional[str] = None,
+    query: Optional[str] = None,
+    **kwargs: Any
+) -> Tuple[List[Any], int]:
+    with db_session() as db:
+        q = db.query(model).filter_by(**kwargs)
+        if query and query_attr:
+            normalized_query = query.strip().lower()
+            q = q.filter(getattr(model, query_attr).ilike(f"%{normalized_query}%"))
+        total = q.count()
+        if order_by is not None:
+            q = q.order_by(order_by)
+        if limit > 0:
+            q = q.offset(skip).limit(limit)
+        return [_to_schema(x) for x in q.all()], total
 
 
-def save_notes(notes: list[Note]) -> None:
-    write_file(_NOTES_FILE, [note.model_dump() for note in notes])
+def create_record(model: Type[Any], **kwargs: Any) -> Any:
+    with db_session() as db:
+        db_obj = model(**kwargs)
+        db.add(db_obj)
+        db.flush()
+        return _to_schema(db_obj)
 
 
-def load_groups() -> list["Group"]:
-    from app.schemas.group import Group  # local import to avoid circular
-
-    return [Group.model_validate(group) for group in read_file(_GROUPS_FILE)]
-
-
-def save_groups(groups: list["Group"]) -> None:
-    write_file(_GROUPS_FILE, [group.model_dump() for group in groups])
-
-
-def load_voices() -> list[Voice]:
-    return [Voice.model_validate(voice) for voice in read_file(_VOICES_FILE)]
-
-
-def save_voices(voices: list[Voice]) -> None:
-    write_file(_VOICES_FILE, [voice.model_dump() for voice in voices])
-
-
-def load_pictures() -> list[Picture]:
-    return [Picture.model_validate(picture) for picture in read_file(_PICTURES_FILE)]
+def update_record(
+    model: Type[Any],
+    filter_kwargs: dict,
+    update_kwargs: dict,
+    raise_if_missing: bool = False,
+    missing_detail: str = "Record not found"
+) -> Any:
+    with db_session() as db:
+        db_obj = db.query(model).filter_by(**filter_kwargs).first()
+        if not db_obj:
+            if raise_if_missing:
+                raise HTTPException(status_code=404, detail=missing_detail)
+            return None
+        for k, v in update_kwargs.items():
+            if v is not None:
+                setattr(db_obj, k, v)
+        db.flush()
+        return _to_schema(db_obj)
 
 
-def save_pictures(pictures: list[Picture]) -> None:
-    write_file(_PICTURES_FILE, [picture.model_dump() for picture in pictures])
+def delete_record(model: Type[Any], **kwargs: Any) -> bool:
+    with db_session() as db:
+        db_obj = db.query(model).filter_by(**kwargs).first()
+        if db_obj:
+            db.delete(db_obj)
+            return True
+        return False
 
 
-def load_group_notes_list() -> list["GroupNotesItem"]:
-    from app.schemas.group import GroupNotesItem
-
-    return [GroupNotesItem.model_validate(item) for item in read_file(_GROUP_NOTES_LIST_FILE)]
-
-
-def save_group_notes_list(items: list["GroupNotesItem"]) -> None:
-    write_file(_GROUP_NOTES_LIST_FILE, [item.model_dump() for item in items])
-
-
-def _find_user_by_id(users: list[User], user_id: str) -> Optional[User]:
-    for user in users:
-        if user.user_id == user_id:
-            return user
-    return None
-
-
-def _find_note_by_id(notes: list[Note], user_id: str, note_id: str) -> Optional[Note]:
-    for note in notes:
-        if note.note_id == note_id and note.user_id == user_id:
-            return note
-    return None
-
-
-def _find_group_by_id(groups: list[Group], user_id: str, group_id: str) -> Optional[Group]:
-    for group in groups:
-        if group.group_id == group_id and group.user_id == user_id:
-            return group
-    return None
-
-
-def _find_voice_by_id(voices: list[Voice], user_id: str, voice_id: str) -> Optional[Voice]:
-    for voice in voices:
-        if voice.voice_id == voice_id and voice.user_id == user_id:
-            return voice
-    return None
-
-
-def _find_picture_by_id(pictures: list[Picture], user_id: str, picture_id: str) -> Optional[Picture]:
-    for picture in pictures:
-        if picture.picture_id == picture_id and picture.user_id == user_id:
-            return picture
-    return None
-
-
-def _raise_validation_error(exc: Exception) -> None:
-    if isinstance(exc, ValidationError):
-        errors = [
-            f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
-            for err in exc.errors()
-        ]
-        raise HTTPException(status_code=422, detail={"validation_errors": errors})
-    raise HTTPException(status_code=422, detail={"validation_errors": [str(exc)]})
+def manage_group_note(group_id: str, note_id: str, user_id: str, action: str) -> dict:
+    with db_session() as db:
+        g = db.query(DBGroup).filter(DBGroup.group_id == group_id, DBGroup.user_id == user_id).first()
+        n = db.query(DBNote).filter(DBNote.note_id == note_id, DBNote.user_id == user_id).first()
+        if not g or not n:
+            raise Exception("Group or Note not found")
+        if action == "add":
+            if n in g.notes:
+                raise Exception("Note already in group")
+            g.notes.append(n)
+        elif action == "remove":
+            if n not in g.notes:
+                raise Exception("Note not in group")
+            g.notes.remove(n)
+        db.flush()
+        return {"group_id": g.group_id, "note_ids": [note.note_id for note in g.notes]}
